@@ -1,0 +1,179 @@
+---
+- name: vCenter - Sanal Makine Snapshot Yönetimi (Oluştur/Sil)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  strategy: free
+
+  vars:
+    snapshot_action: "create"  # Seçenekler: "create", "delete"
+    # vCenter sunucularınızın adreslerini liste olarak girin
+    vcenter_hostnames:
+      - "vcenter1.sirket.local"
+      - "vcenter2.sirket.local"
+    vcenter_validate_certs: false # SSL sertifika doğrulaması (üretim ortamında true yapın)
+    
+    # Snapshot alınacak sanal makinelerin listesi
+    vm_names:
+      - "prod-db-01"
+      - "prod-app-01"
+      - "bu-sunucu-yok" # Test için bulunamayan bir sunucu
+    
+    # Snapshot configuration
+    snapshot_retention_days: 7      # Snapshot'ın kaç gün sonra silineceği
+    max_snapshot_count: 10          # Bir VM'de bulunabilecek maksimum snapshot sayısı
+    snapshot_prefix: "AWX_Auto"     # Otomatik oluşturulan snapshot'ları tanımak için önek
+    snapshot_name: "{{ snapshot_prefix }}_{{ ansible_date_time.iso8601_basic_short }}"
+    snapshot_description: "Otomatik AWX snapshot'ı | Expires: {{ (ansible_date_time.epoch | int + (snapshot_retention_days | int * 86400)) | to_datetime('%Y-%m-%dT%H:%M:%SZ') }}"
+    # vcenter_user ve vcenter_password değişkenleri AWX Credential'dan gelecektir.
+
+  pre_tasks:
+    - name: Raporlama için listeleri başlat
+      ansible.builtin.set_fact:
+        snapshotted_vms: []
+        skipped_vms_limit_exceeded: []
+        not_found_vms: []
+        deleted_snapshots: []
+
+  tasks:
+    # ==============================================================================
+    # == SNAPSHOT OLUŞTURMA BLOĞU
+    # ==============================================================================
+    - name: "Eylem: Snapshot OLUŞTUR"
+      when: snapshot_action == 'create'
+      block:
+        - name: "VM Listesi Üzerinde İşlem Yap: {{ vm_names | join(', ') }}"
+          loop: "{{ vm_names }}"
+          loop_control:
+            loop_var: current_vm_name
+            throttle: 5
+          vars:
+            vm_found_and_processed: false
+          block:
+            - name: "VM: {{ current_vm_name }} | vCenter'larda ara ve snapshot al"
+              loop: "{{ vcenter_hostnames }}"
+              loop_control:
+                loop_var: current_vcenter
+              block:
+                - name: "VM: {{ current_vm_name }} | vCenter: {{ current_vcenter }} | İşlemleri dene"
+                  when: not vm_found_and_processed
+                  block:
+                    - name: "VM: {{ current_vm_name }} | Bilgileri al"
+                      community.vmware.vmware_guest_info:
+                        hostname: "{{ current_vcenter }}"
+                        username: "{{ vcenter_user }}"
+                        password: "{{ vcenter_password }}"
+                        validate_certs: "{{ vcenter_validate_certs }}"
+                        name: "{{ current_vm_name }}"
+                        schema: "vsphere"
+                        properties: ["snapshot"]
+                      register: vm_info
+
+                    - name: "VM: {{ current_vm_name }} | Snapshot işlemlerini yürüt"
+                      when: vm_info.instance is defined and vm_info.instance
+                      block:
+                        - name: "VM: {{ current_vm_name }} | Snapshot limiti kontrol et ve yeni snapshot al"
+                          when: vm_info.instance.snapshots | length < max_snapshot_count
+                          community.vmware.vmware_guest_snapshot:
+                            hostname: "{{ current_vcenter }}"
+                            username: "{{ vcenter_user }}"
+                            password: "{{ vcenter_password }}"
+                            validate_certs: "{{ vcenter_validate_certs }}"
+                            uuid: "{{ vm_info.instance.uuid }}"
+                            state: present
+                            snapshot_name: "{{ snapshot_name }}"
+                            description: "{{ snapshot_description }}"
+                            memory_snapshot: false
+                          register: snapshot_result
+
+                        - name: "VM: {{ current_vm_name }} | Raporlama listelerini güncelle"
+                          ansible.builtin.set_fact:
+                            snapshotted_vms: "{{ snapshotted_vms + [current_vm_name] if snapshot_result.changed else snapshotted_vms }}"
+                            skipped_vms_limit_exceeded: "{{ skipped_vms_limit_exceeded + [current_vm_name] if not snapshot_result.changed and (vm_info.instance.snapshots | length >= max_snapshot_count) else skipped_vms_limit_exceeded }}"
+                            vm_found_and_processed: true
+              rescue:
+                - name: "VM: {{ current_vm_name }} | vCenter: {{ current_vcenter }} | Bulunamadı"
+                  ansible.builtin.debug:
+                    msg: "Sanal makine '{{ current_vm_name }}', '{{ current_vcenter }}' üzerinde bulunamadı. Sonraki vCenter denenecek."
+          always:
+            - name: "VM: {{ current_vm_name }} | Bulunamayanlar listesine ekle"
+              when: not vm_found_and_processed
+              ansible.builtin.set_fact:
+                not_found_vms: "{{ not_found_vms + [current_vm_name] }}"
+
+    # ==============================================================================
+    # == SNAPSHOT SİLME BLOĞU
+    # ==============================================================================
+    - name: "Eylem: Süresi Dolan Snapshot'ları SİL"
+      when: snapshot_action == 'delete'
+      block:
+        - name: "vCenter Listesi Üzerinde Tarama Yap"
+          loop: "{{ vcenter_hostnames }}"
+          loop_control:
+            loop_var: current_vcenter
+          block:
+            - name: "vCenter: {{ current_vcenter }} | Tüm VM'leri ve snapshot'larını getir"
+              community.vmware.vmware_vm_info:
+                hostname: "{{ current_vcenter }}"
+                username: "{{ vcenter_user }}"
+                password: "{{ vcenter_password }}"
+                validate_certs: "{{ vcenter_validate_certs }}"
+                vm_type: vm
+              register: all_vms_info
+              ignore_errors: true
+
+            - name: "vCenter: {{ current_vcenter }} | Süresi dolan snapshot'ları bul ve sil"
+              when: all_vms_info.virtual_machines is defined
+              community.vmware.vmware_guest_snapshot:
+                hostname: "{{ current_vcenter }}"
+                username: "{{ vcenter_user }}"
+                password: "{{ vcenter_password }}"
+                validate_certs: "{{ vcenter_validate_certs }}"
+                uuid: "{{ vm_item.uuid }}"
+                snapshot_name: "{{ snap_item.snapshot_name }}"
+                state: absent
+              loop: "{{ all_vms_info.virtual_machines | subelements('snapshots', {'skip_missing': True}) }}"
+              loop_control:
+                loop_var: "[vm_item, snap_item]"
+                label: "VM: {{ vm_item.guest_name }} - Snap: {{ snap_item.snapshot_name }}"
+              vars:
+                expiration_date_str: "{{ snap_item.snapshot_description | regex_search('Expires: (.*)', '\\1') | first | default('') }}"
+                expiration_epoch: "{{ expiration_date_str | to_datetime('%Y-%m-%dT%H:%M:%SZ') | strftime('%s') | int(default=0) }}"
+                current_epoch: "{{ ansible_date_time.epoch | int }}"
+              when:
+                - snap_item.snapshot_name.startswith(snapshot_prefix)
+                - expiration_epoch > 0
+                - current_epoch > expiration_epoch
+              register: deletion_results
+
+            - name: "Silinen snapshot'ları raporlama listesine ekle"
+              when: deletion_results is defined and deletion_results.results
+              ansible.builtin.set_fact:
+                deleted_snapshots: "{{ deleted_snapshots + [item.item.1.snapshot_name ~ ' (VM: ' ~ item.item.0.guest_name ~ ')'] }}"
+              loop: "{{ deletion_results.results }}"
+              when: item.changed
+
+- name: Raporlama
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: "ÖZET: Snapshot'ı Başarıyla Alınan Sunucular"
+      when: snapshot_action == 'create'
+      ansible.builtin.debug:
+        msg: "{{ snapshotted_vms | default(['Snapshot alınan sunucu yok.']) }}"
+
+    - name: "ÖZET: Snapshot Sayısı Limiti Aşıldığı İçin Atlanan Sunucular"
+      when: snapshot_action == 'create'
+      ansible.builtin.debug:
+        msg: "{{ skipped_vms_limit_exceeded | default(['Snapshot limiti nedeniyle atlanan sunucu yok.']) }}"
+
+    - name: "ÖZET: vCenter'larda Bulunamayan Sunucular"
+      when: snapshot_action == 'create'
+      ansible.builtin.debug:
+        msg: "{{ not_found_vms | default(['Tüm sunucular bulundu.']) }}"
+
+    - name: "ÖZET: Silinen Süresi Dolmuş Snapshot'lar"
+      when: snapshot_action == 'delete'
+      ansible.builtin.debug:
+        msg: "{{ deleted_snapshots | default(['Silinen süresi dolmuş snapshot yok.']) }}"
