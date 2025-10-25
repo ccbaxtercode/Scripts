@@ -1,0 +1,117 @@
+---
+# Schedule Creation Tasks
+# Snapshot silme işlemi için AWX schedule oluşturma
+
+- name: "Silme tarihini hesapla"
+  set_fact:
+    delete_date: "{{ (ansible_date_time.epoch | int) + (retention_days | int * 86400) }}"
+    delete_datetime: "{{ ansible_date_time.epoch | int + (retention_days | int * 86400) | strftime('%Y-%m-%d %H:%M:%S') }}"
+
+- name: "AWX API token oluştur"
+  uri:
+    url: "{{ lookup('env', 'AWX_HOST') }}/api/v2/authentication/token/"
+    method: POST
+    body_format: json
+    body:
+      username: "{{ lookup('env', 'AWX_USER') }}"
+      password: "{{ lookup('env', 'AWX_PASS') }}"
+    status_code: 200
+  register: auth_result
+  when: lookup('env', 'AWX_HOST') is defined
+
+- name: "Token'ı kaydet"
+  set_fact:
+    awx_token: "{{ auth_result.json.token }}"
+  when: auth_result is defined and auth_result.json.token is defined
+
+- name: "Template ID'yi al"
+  uri:
+    url: "{{ lookup('env', 'AWX_HOST') }}/api/v2/job_templates/"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ awx_token }}"
+    body_format: json
+  register: template_list
+  when: awx_token is defined
+
+- name: "Snapshot silme template'ini bul"
+  set_fact:
+    delete_template_id: "{{ item.id }}"
+  when: 
+    - awx_token is defined
+    - item.name == "vcenter-snapshot-delete"
+  loop: "{{ template_list.json.results }}"
+
+- name: "Schedule oluştur"
+  uri:
+    url: "{{ lookup('env', 'AWX_HOST') }}/api/v2/schedules/"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ awx_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      name: "Snapshot Delete - {{ ansible_date_time.iso8601_basic_short }}"
+      description: "{{ successful_snapshots | join(', ') }} sunucularının snapshot'larını sil"
+      schedule_type: "run_once"
+      run_at: "{{ delete_datetime }}"
+      job_type: "job"
+      job_tags: "delete"
+      extra_data:
+        server_list: "{{ successful_snapshots | join(',') }}"
+        domain: "{{ domain }}"
+        operation: "delete"
+        notification_email: "{{ notification_email }}"
+        description: "Otomatik silme - {{ ansible_date_time.iso8601 }}"
+      job_template: "{{ delete_template_id }}"
+    status_code: 201
+  register: schedule_result
+  when: 
+    - awx_token is defined
+    - delete_template_id is defined
+    - successful_snapshots | length > 0
+
+- name: "Schedule oluşturma sonucunu logla"
+  debug:
+    msg: "Schedule oluşturuldu: {{ schedule_result.json.name }} - {{ delete_datetime }}"
+  when: schedule_result is defined and schedule_result.json.name is defined
+
+- name: "Schedule oluşturma hatası"
+  fail:
+    msg: "Schedule oluşturulamadı: {{ schedule_result.msg }}"
+  when: 
+    - schedule_result is defined
+    - schedule_result.status != 201
+
+- name: "Schedule bilgilerini mail ile gönder"
+  mail:
+    host: "{{ lookup('env', 'SMTP_HOST') | default('localhost') }}"
+    port: "{{ lookup('env', 'SMTP_PORT') | default(587) }}"
+    username: "{{ lookup('env', 'SMTP_USER') | default('') }}"
+    password: "{{ lookup('env', 'SMTP_PASS') | default('') }}"
+    to: "{{ notification_email }}"
+    subject: "Snapshot Silme Schedule Oluşturuldu - {{ ansible_date_time.date }}"
+    body: |
+      <h2>Snapshot Silme Schedule Oluşturuldu</h2>
+      
+      <h3>Schedule Detayları:</h3>
+      <ul>
+        <li><strong>Schedule Adı:</strong> {{ schedule_result.json.name }}</li>
+        <li><strong>Silme Tarihi:</strong> {{ delete_datetime }}</li>
+        <li><strong>Sunucu Sayısı:</strong> {{ successful_snapshots | length }}</li>
+        <li><strong>Domain:</strong> {{ domain }}</li>
+      </ul>
+      
+      <h3>Silinecek Sunucular:</h3>
+      <ul>
+      {% for server in successful_snapshots %}
+      <li>{{ server }}</li>
+      {% endfor %}
+      </ul>
+      
+      <p><strong>Not:</strong> Bu schedule {{ retention_days }} gün sonra otomatik olarak çalışacak ve snapshot'ları silecektir.</p>
+    subtype: "html"
+  when: 
+    - notification_email != ""
+    - schedule_result is defined
+    - schedule_result.status == 201

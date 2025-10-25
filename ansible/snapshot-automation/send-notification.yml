@@ -1,0 +1,150 @@
+---
+# Mail Notification Tasks
+# vCenter snapshot işlemleri sonrası mail bildirimi
+
+- name: "Mail içeriğini oluştur"
+  set_fact:
+    mail_subject: "vCenter Snapshot {{ operation | title }} İşlemi Sonucu - {{ ansible_date_time.date }}"
+    mail_body: |
+      vCenter Snapshot {{ operation | title }} İşlemi Tamamlandı
+      
+      İşlem Detayları:
+      - İşlem Türü: {{ operation | title }}
+      - Domain: {{ domain }}
+      - Tutulacak Gün Sayısı: {{ retention_days }}
+      - İşlem Tarihi: {{ ansible_date_time.iso8601 }}
+      
+      {% if found_servers | length > 0 %}
+      Bulunan Sunucular ({{ found_servers | length }} adet):
+      {% for server in found_servers %}
+      - {{ server }}
+      {% endfor %}
+      {% endif %}
+      
+      {% if successful_snapshots | length > 0 %}
+      Başarılı İşlemler ({{ successful_snapshots | length }} adet):
+      {% for server in successful_snapshots %}
+      - {{ server }}
+      {% endfor %}
+      {% endif %}
+      
+      {% if failed_snapshots | length > 0 %}
+      Başarısız İşlemler ({{ failed_snapshots | length }} adet):
+      {% for server in failed_snapshots %}
+      - {{ server }}
+      {% endfor %}
+      {% endif %}
+      
+      {% if not_found_servers | length > 0 %}
+      Bulunamayan Sunucular ({{ not_found_servers | length }} adet):
+      {% for server in not_found_servers %}
+      - {{ server }}
+      {% endfor %}
+      {% endif %}
+      
+      {% if error_messages | length > 0 %}
+      Hata Mesajları:
+      {% for error in error_messages %}
+      - {{ error }}
+      {% endfor %}
+      {% endif %}
+      
+      {% if operation == "take" and successful_snapshots | length > 0 %}
+      Not: Bu snapshot'lar {{ retention_days }} gün sonra otomatik olarak silinecektir.
+      {% endif %}
+
+- name: "Mail gönder"
+  mail:
+    host: "{{ lookup('env', 'SMTP_HOST') | default('localhost') }}"
+    port: "{{ lookup('env', 'SMTP_PORT') | default(587) }}"
+    username: "{{ lookup('env', 'SMTP_USER') | default('') }}"
+    password: "{{ lookup('env', 'SMTP_PASS') | default('') }}"
+    to: "{{ notification_email }}"
+    subject: "{{ mail_subject }}"
+    body: "{{ mail_body }}"
+    subtype: "html"
+  when: notification_email != ""
+
+- name: "Hata durumunda ek mail gönder"
+  mail:
+    host: "{{ lookup('env', 'SMTP_HOST') | default('localhost') }}"
+    port: "{{ lookup('env', 'SMTP_PORT') | default(587) }}"
+    username: "{{ lookup('env', 'SMTP_USER') | default('') }}"
+    password: "{{ lookup('env', 'SMTP_PASS') | default('') }}"
+    to: "{{ notification_email }}"
+    subject: "vCenter Snapshot İşlemi HATA - {{ ansible_date_time.date }}"
+    body: |
+      <h2>vCenter Snapshot İşlemi Hata Raporu</h2>
+      
+      <h3>Hata Detayları:</h3>
+      <ul>
+      {% for error in error_messages %}
+      <li>{{ error }}</li>
+      {% endfor %}
+      </ul>
+      
+      <h3>Bulunamayan Sunucular:</h3>
+      <ul>
+      {% for server in not_found_servers %}
+      <li>{{ server }}</li>
+      {% endfor %}
+      </ul>
+      
+      <h3>Başarısız İşlemler:</h3>
+      <ul>
+      {% for server in failed_snapshots %}
+      <li>{{ server }}</li>
+      {% endfor %}
+      </ul>
+      
+      <p><strong>Lütfen bu hataları kontrol edin ve gerekli düzeltmeleri yapın.</strong></p>
+    subtype: "html"
+  when: 
+    - notification_email != ""
+    - (error_messages | length > 0) or (not_found_servers | length > 0) or (failed_snapshots | length > 0)
+
+- name: "Başarı durumunda özet mail gönder"
+  mail:
+    host: "{{ lookup('env', 'SMTP_HOST') | default('localhost') }}"
+    port: "{{ lookup('env', 'SMTP_PORT') | default(587) }}"
+    username: "{{ lookup('env', 'SMTP_USER') | default('') }}"
+    password: "{{ lookup('env', 'SMTP_PASS') | default('') }}"
+    to: "{{ notification_email }}"
+    subject: "vCenter Snapshot İşlemi BAŞARILI - {{ ansible_date_time.date }}"
+    body: |
+      <h2>vCenter Snapshot İşlemi Başarıyla Tamamlandı</h2>
+      
+      <h3>İşlem Özeti:</h3>
+      <ul>
+        <li><strong>İşlem Türü:</strong> {{ operation | title }}</li>
+        <li><strong>Domain:</strong> {{ domain }}</li>
+        <li><strong>Başarılı İşlem:</strong> {{ successful_snapshots | length }} adet</li>
+        <li><strong>İşlem Tarihi:</strong> {{ ansible_date_time.iso8601 }}</li>
+      </ul>
+      
+      {% if operation == "take" %}
+      <h3>Snapshot Alınan Sunucular:</h3>
+      <ul>
+      {% for server in successful_snapshots %}
+      <li>{{ server }}</li>
+      {% endfor %}
+      </ul>
+      
+      <p><strong>Not:</strong> Bu snapshot'lar {{ retention_days }} gün sonra otomatik olarak silinecektir.</p>
+      {% endif %}
+      
+      {% if operation == "delete" %}
+      <h3>Snapshot Silinen Sunucular:</h3>
+      <ul>
+      {% for server in successful_snapshots %}
+      <li>{{ server }}</li>
+      {% endfor %}
+      </ul>
+      {% endif %}
+    subtype: "html"
+  when: 
+    - notification_email != ""
+    - error_messages | length == 0
+    - not_found_servers | length == 0
+    - failed_snapshots | length == 0
+    - successful_snapshots | length > 0

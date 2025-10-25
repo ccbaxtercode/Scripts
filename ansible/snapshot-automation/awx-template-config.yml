@@ -1,0 +1,181 @@
+---
+# AWX Template Configuration
+# Bu dosya AWX template'lerinin konfigürasyonu için kullanılır
+
+# Ana Snapshot Management Template
+vcenter_snapshot_template:
+  name: "vcenter-snapshot-management"
+  description: "vCenter sanal makinelerinin snapshot yönetimi"
+  job_type: "run"
+  inventory: "vcenter-inventory"
+  project: "vcenter-snapshots"
+  playbook: "vcenter-snapshot-management.yml"
+  verbosity: 1
+  extra_vars: |
+    ---
+    # Survey değişkenleri burada tanımlanacak
+    server_list: "{{ server_list }}"
+    domain: "{{ domain }}"
+    retention_days: "{{ retention_days }}"
+    operation: "{{ operation }}"
+    snapshot_name: "{{ snapshot_name }}"
+    notification_email: "{{ notification_email }}"
+    description: "{{ description }}"
+  
+  survey_enabled: true
+  survey_spec: "awx-snapshot-survey.yml"
+  
+  # Template ayarları
+  ask_inventory_on_launch: false
+  ask_variables_on_launch: false
+  ask_limit_on_launch: false
+  ask_tags_on_launch: false
+  ask_skip_tags_on_launch: false
+  ask_job_type_on_launch: false
+  ask_verbosity_on_launch: false
+  ask_credential_on_launch: false
+  
+  # Webhook ayarları
+  webhook_service: "github"
+  webhook_credential: "github-webhook-credential"
+  
+  # Notification ayarları
+  notification_templates_start: []
+  notification_templates_success: ["snapshot-success-email"]
+  notification_templates_error: ["snapshot-error-email"]
+  notification_templates_approval: []
+
+# Snapshot Delete Template
+vcenter_snapshot_delete_template:
+  name: "vcenter-snapshot-delete"
+  description: "vCenter snapshot silme işlemi"
+  job_type: "run"
+  inventory: "vcenter-inventory"
+  project: "vcenter-snapshots"
+  playbook: "vcenter-snapshot-management.yml"
+  verbosity: 1
+  extra_vars: |
+    ---
+    # Delete işlemi için varsayılan değişkenler
+    operation: "delete"
+    notification_email: "{{ notification_email | default('admin@company.com') }}"
+  
+  # Template ayarları
+  ask_inventory_on_launch: false
+  ask_variables_on_launch: true
+  ask_limit_on_launch: false
+  ask_tags_on_launch: false
+  ask_skip_tags_on_launch: false
+  ask_job_type_on_launch: false
+  ask_verbosity_on_launch: false
+  ask_credential_on_launch: false
+  
+  # Notification ayarları
+  notification_templates_start: []
+  notification_templates_success: ["snapshot-delete-success-email"]
+  notification_templates_error: ["snapshot-delete-error-email"]
+  notification_templates_approval: []
+
+# Workflow Template
+vcenter_snapshot_workflow:
+  name: "vcenter-snapshot-workflow"
+  description: "vCenter snapshot yönetimi workflow'u"
+  job_type: "workflow"
+  
+  # Workflow nodes
+  workflow_nodes:
+    - name: "snapshot-management"
+      unified_job_template: "vcenter-snapshot-management"
+      job_type: "job"
+      all_parents_must_converge: true
+      
+    - name: "schedule-creation"
+      unified_job_template: "vcenter-snapshot-delete"
+      job_type: "job"
+      all_parents_must_converge: false
+      success_nodes: []
+      failure_nodes: []
+      always_nodes: []
+
+# Notification Templates
+notification_templates:
+  - name: "snapshot-success-email"
+    notification_type: "email"
+    subject: "vCenter Snapshot İşlemi Başarılı - {{ job.name }}"
+    body: |
+      vCenter Snapshot işlemi başarıyla tamamlandı.
+      
+      İşlem Detayları:
+      - Job ID: {{ job.id }}
+      - Job Name: {{ job.name }}
+      - Start Time: {{ job.started }}
+      - End Time: {{ job.finished }}
+      - Status: {{ job.status }}
+      
+      Başarılı Sunucular: {{ job.extra_vars.server_list }}
+      
+  - name: "snapshot-error-email"
+    notification_type: "email"
+    subject: "vCenter Snapshot İşlemi Hata - {{ job.name }}"
+    body: |
+      vCenter Snapshot işleminde hata oluştu.
+      
+      Hata Detayları:
+      - Job ID: {{ job.id }}
+      - Job Name: {{ job.name }}
+      - Start Time: {{ job.started }}
+      - End Time: {{ job.finished }}
+      - Status: {{ job.status }}
+      - Error: {{ job.failed }}
+      
+      Lütfen hataları kontrol edin.
+      
+  - name: "snapshot-delete-success-email"
+    notification_type: "email"
+    subject: "vCenter Snapshot Silme Başarılı - {{ job.name }}"
+    body: |
+      vCenter Snapshot silme işlemi başarıyla tamamlandı.
+      
+      Silinen Sunucular: {{ job.extra_vars.server_list }}
+      
+  - name: "snapshot-delete-error-email"
+    notification_type: "email"
+    subject: "vCenter Snapshot Silme Hata - {{ job.name }}"
+    body: |
+      vCenter Snapshot silme işleminde hata oluştu.
+      
+      Hata Detayları:
+      - Job ID: {{ job.id }}
+      - Error: {{ job.failed }}
+      
+      Lütfen hataları kontrol edin.
+
+# Credential Templates
+credential_templates:
+  - name: "vcenter1-credential"
+    credential_type: "vmware"
+    inputs:
+      host: "vcenter1.company.com"
+      username: "{{ lookup('env', 'VCENTER1_USER') }}"
+      password: "{{ lookup('env', 'VCENTER1_PASS') }}"
+      validate_certs: false
+      
+  - name: "vcenter2-credential"
+    credential_type: "vmware"
+    inputs:
+      host: "vcenter2.company.com"
+      username: "{{ lookup('env', 'VCENTER2_USER') }}"
+      password: "{{ lookup('env', 'VCENTER2_PASS') }}"
+      validate_certs: false
+      
+  - name: "smtp-credential"
+    credential_type: "machine"
+    inputs:
+      username: "{{ lookup('env', 'SMTP_USER') }}"
+      password: "{{ lookup('env', 'SMTP_PASS') }}"
+      
+  - name: "awx-api-credential"
+    credential_type: "machine"
+    inputs:
+      username: "{{ lookup('env', 'AWX_USER') }}"
+      password: "{{ lookup('env', 'AWX_PASS') }}"

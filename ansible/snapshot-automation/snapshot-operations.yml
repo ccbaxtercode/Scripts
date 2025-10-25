@@ -1,0 +1,124 @@
+---
+# Snapshot Operations Tasks
+# vCenter snapshot alma/silme işlemleri
+
+- name: "Sunucu konum bilgilerini belirle"
+  set_fact:
+    server_vcenter_info: "{{ server_locations[item] }}"
+  loop: "{{ found_servers }}"
+  when: operation == "take"
+
+- name: "Snapshot sayısını kontrol et (take işlemi için)"
+  vmware_guest_snapshot_info:
+    hostname: "{{ server_locations[item]['vcenter'] }}"
+    username: "{{ vcenter1.username if server_locations[item]['vcenter'] == vcenter1.hostname else vcenter2.username }}"
+    password: "{{ vcenter1.password if server_locations[item]['vcenter'] == vcenter1.hostname else vcenter2.password }}"
+    datacenter: "{{ server_locations[item]['datacenter'] }}"
+    name: "{{ item }}"
+    validate_certs: false
+  register: snapshot_info
+  loop: "{{ found_servers }}"
+  when: operation == "take"
+  ignore_errors: true
+
+- name: "5'ten fazla snapshot kontrolü"
+  fail:
+    msg: "Sunucu {{ item.item }} üzerinde 5 veya daha fazla snapshot bulunuyor. Mevcut snapshot sayısı: {{ item.snapshots | length }}"
+  when: 
+    - operation == "take"
+    - item.snapshots is defined
+    - item.snapshots | length >= 5
+  loop: "{{ snapshot_info.results }}"
+
+- name: "Snapshot adını oluştur"
+  set_fact:
+    current_snapshot_name: "{{ snapshot_name if snapshot_name != '' else 'AWX_' + ansible_date_time.iso8601_basic_short + '_' + item }}"
+  loop: "{{ found_servers }}"
+  when: operation == "take"
+
+- name: "Snapshot al"
+  vmware_guest_snapshot:
+    hostname: "{{ server_locations[item]['vcenter'] }}"
+    username: "{{ vcenter1.username if server_locations[item]['vcenter'] == vcenter1.hostname else vcenter2.username }}"
+    password: "{{ vcenter1.password if server_locations[item]['vcenter'] == vcenter1.hostname else vcenter2.password }}"
+    datacenter: "{{ server_locations[item]['datacenter'] }}"
+    name: "{{ item }}"
+    snapshot_name: "{{ snapshot_name if snapshot_name != '' else 'AWX_' + ansible_date_time.iso8601_basic_short + '_' + item }}"
+    description: "{{ description }}"
+    memory_snapshot: false
+    quiesce: true
+    validate_certs: false
+  register: snapshot_result
+  loop: "{{ found_servers }}"
+  when: operation == "take"
+  ignore_errors: true
+
+- name: "Snapshot sil"
+  vmware_guest_snapshot:
+    hostname: "{{ server_locations[item]['vcenter'] }}"
+    username: "{{ vcenter1.username if server_locations[item]['vcenter'] == vcenter1.hostname else vcenter2.username }}"
+    password: "{{ vcenter1.password if server_locations[item]['vcenter'] == vcenter1.hostname else vcenter2.password }}"
+    datacenter: "{{ server_locations[item]['datacenter'] }}"
+    name: "{{ item }}"
+    state: "absent"
+    snapshot_name: "{{ snapshot_name }}"
+    validate_certs: false
+  register: delete_result
+  loop: "{{ found_servers }}"
+  when: operation == "delete"
+  ignore_errors: true
+
+- name: "Başarılı snapshot işlemlerini kaydet"
+  set_fact:
+    successful_snapshots: "{{ successful_snapshots + [item.item] }}"
+  when: 
+    - operation == "take"
+    - item is not failed
+    - item.changed is defined
+    - item.changed == true
+  loop: "{{ snapshot_result.results }}"
+
+- name: "Başarılı silme işlemlerini kaydet"
+  set_fact:
+    successful_snapshots: "{{ successful_snapshots + [item.item] }}"
+  when: 
+    - operation == "delete"
+    - item is not failed
+    - item.changed is defined
+    - item.changed == true
+  loop: "{{ delete_result.results }}"
+
+- name: "Başarısız işlemleri kaydet"
+  set_fact:
+    failed_snapshots: "{{ failed_snapshots + [item.item] }}"
+  when: item is failed
+  loop: "{{ (snapshot_result.results if operation == 'take' else delete_result.results) }}"
+
+- name: "Başarısız işlem hata mesajlarını kaydet"
+  set_fact:
+    error_messages: "{{ error_messages + ['Sunucu ' + item.item + ' işlemi başarısız: ' + item.msg] }}"
+  when: item is failed
+  loop: "{{ (snapshot_result.results if operation == 'take' else delete_result.results) }}"
+
+- name: "Snapshot doğrulama (take işlemi için)"
+  vmware_guest_snapshot_info:
+    hostname: "{{ server_locations[item]['vcenter'] }}"
+    username: "{{ vcenter1.username if server_locations[item]['vcenter'] == vcenter1.hostname else vcenter2.username }}"
+    password: "{{ vcenter1.password if server_locations[item]['vcenter'] == vcenter1.hostname else vcenter2.password }}"
+    datacenter: "{{ server_locations[item]['datacenter'] }}"
+    name: "{{ item }}"
+    validate_certs: false
+  register: verify_snapshot
+  loop: "{{ successful_snapshots }}"
+  when: 
+    - operation == "take"
+    - successful_snapshots | length > 0
+  ignore_errors: true
+
+- name: "Snapshot doğrulama sonucu"
+  set_fact:
+    verified_snapshots: "{{ verified_snapshots + [item.item] if item.snapshots is defined and item.snapshots | length > 0 else [] }}"
+  loop: "{{ verify_snapshot.results }}"
+  when: 
+    - operation == "take"
+    - successful_snapshots | length > 0

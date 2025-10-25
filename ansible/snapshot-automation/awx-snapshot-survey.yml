@@ -1,0 +1,69 @@
+---
+# AWX Survey Template for vCenter Snapshot Management
+# Bu dosya AWX'te survey olarak kullanılacak
+
+name: "vCenter Snapshot Management Survey"
+description: "vCenter sanal makinelerinin snapshot yönetimi için parametreler"
+
+spec:
+  - question_name: "server_list"
+    question_description: "Snapshot alınacak/silinecek sunucu listesi (virgül ile ayırın)"
+    variable: "server_list"
+    type: "textarea"
+    required: true
+    default: ""
+    choices: ""
+    min: 1
+    max: 10  # 10'dan fazla sunucu kontrolü
+
+  - question_name: "domain"
+    question_description: "Sunucuların bulunduğu domain"
+    variable: "domain"
+    type: "multiplechoice"
+    required: true
+    default: "production"
+    choices:
+      - "production"
+      - "development"
+      - "test"
+      - "staging"
+
+  - question_name: "retention_days"
+    question_description: "Snapshot'ların tutulacağı gün sayısı"
+    variable: "retention_days"
+    type: "integer"
+    required: true
+    default: 7
+    min: 1
+    max: 365
+
+  - question_name: "operation"
+    question_description: "Yapılacak işlem"
+    variable: "operation"
+    type: "multiplechoice"
+    required: true
+    default: "take"
+    choices:
+      - "take"
+      - "delete"
+
+  - question_name: "snapshot_name"
+    question_description: "Snapshot adı (opsiyonel - boş bırakılırsa otomatik oluşturulur)"
+    variable: "snapshot_name"
+    type: "text"
+    required: false
+    default: ""
+
+  - question_name: "notification_email"
+    question_description: "Bildirim gönderilecek e-posta adresi"
+    variable: "notification_email"
+    type: "text"
+    required: true
+    default: "admin@company.com"
+
+  - question_name: "description"
+    question_description: "Snapshot açıklaması (opsiyonel)"
+    variable: "description"
+    type: "text"
+    required: false
+    default: "AWX tarafından oluşturulan snapshot"
