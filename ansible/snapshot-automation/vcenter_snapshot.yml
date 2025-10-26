@@ -148,10 +148,12 @@
 
             - name: "Silinen snapshot'ları raporlama listesine ekle"
               when: deletion_results is defined and deletion_results.results
+              loop: "{{ deletion_results.results }}"
               ansible.builtin.set_fact:
                 deleted_snapshots: "{{ deleted_snapshots + [item.item.1.snapshot_name ~ ' (VM: ' ~ item.item.0.guest_name ~ ')'] }}"
               loop: "{{ deletion_results.results }}"
               when: item.changed
+                deleted_snapshots: "{{ deleted_snapshots + [item.item.1.snapshot_name ~ ' (VM: ' ~ item.item.0.guest_name ~ ')'] if item.changed else deleted_snapshots }}"
 
 - name: Raporlama
   hosts: localhost
@@ -177,3 +179,9 @@
       when: snapshot_action == 'delete'
       ansible.builtin.debug:
         msg: "{{ deleted_snapshots | default(['Silinen süresi dolmuş snapshot yok.']) }}"
+        msg:
+          - "Eylem: {{ snapshot_action }}"
+          - "Başarıyla Snapshot'ı Alınanlar: {{ snapshotted_vms | default(['Yok']) }}"
+          - "Limit Aşıldığı İçin Atlananlar: {{ skipped_vms_limit_exceeded | default(['Yok']) }}"
+          - "Bulunamayan Sunucular: {{ not_found_vms | default(['Yok']) }}"
+          - "Silinen Snapshot'lar: {{ deleted_snapshots | default(['Yok']) }}"
