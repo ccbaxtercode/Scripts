@@ -1,0 +1,37 @@
+---
+# roles/vcenter_snapshot/tasks/00_pre_checks.yml
+
+- name: "Kontrol: 'service_desk_ticket' parametresi zorunludur"
+  ansible.builtin.fail:
+    msg: "Lütfen 'service_desk_ticket' parametresini sağlayın (örn: INC123456)."
+  when: service_desk_ticket is not defined or service_desk_ticket | trim == ''
+
+- name: "Kontrol: 'snapshot_action' parametresi geçerli mi"
+  ansible.builtin.fail:
+    msg: "Geçersiz 'snapshot_action' değeri: '{{ snapshot_action }}'. Sadece 'create' veya 'delete' kullanılabilir."
+  when: snapshot_action not in ['create', 'delete']
+
+- name: "Kontrol: İşlenecek VM listesi boş olamaz"
+  ansible.builtin.fail:
+    msg: "Lütfen 'vm_names' listesini en az bir sanal makine ile sağlayın."
+  when: vm_names is not defined or vm_names | length == 0
+
+- name: "Kontrol: VM sayısı limiti ({{ max_vm_process_limit }}) aşıldı mı"
+  ansible.builtin.fail:
+    msg: "Tek seferde en fazla {{ max_vm_process_limit }} sanal makine işleyebilirsiniz. Sağlanan: {{ vm_names | length }}"
+  when: vm_names | length > max_vm_process_limit
+
+- name: "Hazırlık: Her VM için merkezi durum nesnesini oluştur"
+  ansible.builtin.set_fact:
+    vm_processing_status: "{{ vm_processing_status | default({}) | combine({item: vm_initial_state}) }}"
+  loop: "{{ vm_names }}"
+  vars:
+    vm_initial_state:
+      status: "pending"
+      found: false
+      message: "İşlem bekleniyor."
+      vcenter_hostname: null
+      datacenter: null
+      folder: null
+      snapshot_count: null
+      action_result: {}

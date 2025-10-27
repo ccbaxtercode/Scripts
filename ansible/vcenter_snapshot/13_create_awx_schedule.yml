@@ -1,0 +1,37 @@
+---
+# roles/vcenter_snapshot/tasks/13_create_awx_schedule.yml
+
+- name: "AWX Hazırlık: Başarılı VM'lerin listesini oluştur"
+  ansible.builtin.set_fact:
+    successful_vms_for_schedule: "{{ vm_processing_status | dict2items | selectattr('value.status', 'equalto', 'success') | map(attribute='key') | list }}"
+  run_once: true
+
+- name: "AWX Schedule: Silme görevini zamanla"
+  when: successful_vms_for_schedule is defined and successful_vms_for_schedule | length > 0
+  run_once: true
+  block:
+    - name: "Tarih Hesapla: Silme tarihi ({{ snapshot_retention_days }} gün sonra)"
+      ansible.builtin.set_fact:
+        deletion_epoch: "{{ (ansible_date_time.epoch | int) + (snapshot_retention_days | int * 86400) }}"
+
+    - name: "Tarih Formatla: rrule için format"
+      ansible.builtin.set_fact:
+        deletion_date_rrule: "{{ '%Y%m%dT%H%M%SZ' | strftime(deletion_epoch) }}"
+
+    - name: "AWX Schedule Oluştur"
+      awx.awx.schedule:
+        name: "{{ service_desk_ticket }}"
+        unified_job_template: "{{ awx_job_template }}"
+        rrule: "DTSTART:{{ deletion_date_rrule }} RRULE:FREQ=MINUTELY;INTERVAL=1;COUNT=1"
+        description: "Auto-created schedule to delete snapshot for ticket: {{ service_desk_ticket }}"
+        enabled: true
+        extra_data:
+          snapshot_action: "delete"
+          service_desk_ticket: "{{ service_desk_ticket }}"
+          vm_names: "{{ successful_vms_for_schedule }}"
+        state: present
+        controller_host: "{{ awx_host }}"
+        controller_oauthtoken: "{{ awx_token }}"
+        validate_certs: "{{ awx_validate_certs }}"
+      register: schedule_result
+      ignore_errors: true # AWX bağlantı hatası ana süreci durdurmamalı

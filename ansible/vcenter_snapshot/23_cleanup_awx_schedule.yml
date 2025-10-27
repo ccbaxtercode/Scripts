@@ -1,0 +1,13 @@
+---
+# roles/vcenter_snapshot/tasks/23_cleanup_awx_schedule.yml
+
+- name: "AWX Temizlik: İlgili schedule'ı sil"
+  awx.awx.schedule:
+    name: "{{ service_desk_ticket }}"
+    state: absent
+    controller_host: "{{ awx_host }}"
+    controller_oauthtoken: "{{ awx_token }}"
+    validate_certs: "{{ awx_validate_certs }}"
+  register: schedule_deletion_result
+  ignore_errors: true # Schedule yoksa veya silinemezse ana süreci durdurma
+  run_once: true

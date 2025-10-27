@@ -1,0 +1,12 @@
+---
+# roles/vcenter_snapshot/tasks/11_check_snapshot_limit.yml
+
+- name: "Limit Kontrolü: '{{ vm_item.key }}' için snapshot sayısı kontrolü"
+  ansible.builtin.set_fact:
+    vm_processing_status: "{{ vm_processing_status | combine({vm_item.key: vm_item.value | combine({'status': 'skipped', 'message': 'Snapshot sayısı limiti (' ~ max_snapshot_count ~ ') aşıldığı için işlem atlandı. Mevcut: ' ~ vm_item.value.snapshot_count}) }) }}"
+  when:
+    - vm_item.value.status == 'info_gathered'
+    - vm_item.value.snapshot_count >= max_snapshot_count
+  loop: "{{ vm_processing_status | dict2items }}"
+  loop_control:
+    loop_var: vm_item

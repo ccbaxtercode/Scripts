@@ -1,0 +1,8 @@
+---
+# roles/vcenter_snapshot/tasks/20_delete_flow.yml
+
+- name: "Görev 22: Snapshot'ı sil"
+  ansible.builtin.import_tasks: 22_delete_snapshot.yml
+
+- name: "Görev 23: AWX schedule'ını temizle"
+  ansible.builtin.import_tasks: 23_cleanup_awx_schedule.yml
