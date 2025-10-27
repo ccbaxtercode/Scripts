@@ -1,0 +1,214 @@
+---
+- name: vCenter - Sanal Makine Snapshot Yönetimi (Oluştur/Sil)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  strategy: free
+
+  vars:
+    snapshot_action: "create"  # Seçenekler: "create", "delete"
+    
+    # Survey'den gelen değişkenler
+    domain: "{{ domain | default('production') }}"
+    service_desk_ticket: "{{ service_desk_ticket }}"  # ZORUNLU - Survey'den gelecek (örn: INC123456)
+    
+    # vCenter sunucularının adreslerini liste olarak girin
+    vcenter_hostnames:
+      - "vcenter1.sirket.local"
+      - "vcenter2.sirket.local"
+    vcenter_validate_certs: false # SSL sertifika doğrulaması (üretim ortamında true yapın)
+    
+    # Snapshot alınacak sanal makinelerin listesi (Survey'den gelecek)
+    vm_names:
+      - "prod-db-01"
+      - "prod-app-01"
+    
+    # Snapshot configuration
+    snapshot_retention_days: 7      # Snapshot'ın kaç gün sonra silineceği
+    max_snapshot_count: 10          # Bir VM'de bulunabilecek maksimum snapshot sayısı
+    snapshot_prefix: "AWX_Auto"     # Otomatik oluşturulan snapshot'ları tanımak için önek
+    snapshot_name: "{{ snapshot_prefix }}_{{ service_desk_ticket }}_{{ ansible_date_time.iso8601_basic_short }}"
+    snapshot_description: "Service Desk: {{ service_desk_ticket }} | Domain: {{ domain }} | Created: {{ ansible_date_time.iso8601 }}"
+    
+    # AWX Configuration
+    awx_host: "https://awx.sirket.local"  # AWX URL
+    awx_token: "{{ awx_token }}"  # AWX API Token (Credential'dan gelecek)
+    awx_job_template: "vCenter Snapshot Management"  # Bu template'in adı
+    awx_validate_certs: false
+    
+    # vcenter_user ve vcenter_password değişkenleri AWX Credential'dan gelecektir.
+
+  pre_tasks:
+    - name: Service Desk Ticket kontrolü
+      ansible.builtin.fail:
+        msg: "service_desk_ticket parametresi zorunludur! (örn: INC123456)"
+      when: service_desk_ticket is not defined or service_desk_ticket == ''
+
+    - name: Raporlama için listeleri başlat
+      ansible.builtin.set_fact:
+        snapshotted_vms: []
+        skipped_vms_limit_exceeded: []
+        not_found_vms: []
+        deleted_snapshots: []
+        deletion_errors: []
+        snapshot_not_found: []
+        vm_not_found: []
+        create_errors: []
+
+  tasks:
+    # ==============================================================================
+    # == SNAPSHOT OLUŞTURMA BLOĞU
+    # ==============================================================================
+    - name: "Eylem: Snapshot OLUŞTUR"
+      when: snapshot_action == 'create'
+      block:
+        - name: "VM işleme - CREATE"
+          include_tasks: create_snapshot_task.yml
+          loop: "{{ vm_names }}"
+          loop_control:
+            loop_var: current_vm_name
+            throttle: 5
+
+        # AWX Schedule Oluşturma - Sadece başarılı snapshot'lar varsa
+        - name: "AWX Schedule oluştur (silme için)"
+          when: snapshotted_vms | length > 0
+          block:
+            - name: "Gelecek tarih hesapla ({{ snapshot_retention_days }} gün sonra)"
+              ansible.builtin.set_fact:
+                deletion_epoch: "{{ (ansible_date_time.epoch | int) + (snapshot_retention_days | int * 86400) }}"
+            
+            - name: "Deletion date formatla"
+              ansible.builtin.set_fact:
+                deletion_date: "{{ deletion_epoch | int | strftime('%Y%m%dT%H%M%SZ') }}"
+
+            - name: "AWX Schedule oluştur"
+              awx.awx.schedule:
+                name: "Delete_AWX_Snapshot_{{ domain }}_{{ service_desk_ticket }}"
+                unified_job_template: "{{ awx_job_template }}"
+                rrule: "DTSTART:{{ deletion_date }} RRULE:FREQ=MINUTELY;INTERVAL=1;COUNT=1"
+                description: "Auto-created schedule to delete snapshot: {{ snapshot_name }}"
+                enabled: true
+                extra_data:
+                  snapshot_action: "delete"
+                  service_desk_ticket: "{{ service_desk_ticket }}"
+                  snapshot_name: "{{ snapshot_name }}"
+                  domain: "{{ domain }}"
+                  vm_names: "{{ snapshotted_vms }}"
+                state: present
+                controller_host: "{{ awx_host }}"
+                controller_oauthtoken: "{{ awx_token }}"
+                validate_certs: "{{ awx_validate_certs }}"
+              register: schedule_result
+
+            - name: "Schedule oluşturma sonucu"
+              ansible.builtin.debug:
+                msg: "Schedule başarıyla oluşturuldu: Delete_AWX_Snapshot_{{ domain }}_{{ service_desk_ticket }}"
+              when: schedule_result is succeeded
+
+    # ==============================================================================
+    # == SNAPSHOT SİLME BLOĞU
+    # ==============================================================================
+    - name: "Eylem: Belirli Snapshot'ı SİL"
+      when: snapshot_action == 'delete'
+      block:
+        - name: "Silinecek snapshot bilgilerini kontrol et"
+          ansible.builtin.fail:
+            msg: "Delete işlemi için 'snapshot_name' ve 'vm_names' parametreleri gerekli!"
+          when: 
+            - snapshot_name is not defined or snapshot_name == ''
+            - vm_names is not defined or vm_names | length == 0
+
+        - name: "VM işleme - DELETE"
+          include_tasks: delete_snapshot_task.yml
+          loop: "{{ vm_names }}"
+          loop_control:
+            loop_var: current_vm_name
+            throttle: 5
+
+        # Silme işlemi bittikten sonra AWX Schedule'ı temizle
+        - name: "AWX Schedule'ı sil"
+          awx.awx.schedule:
+            name: "Delete_AWX_Snapshot_{{ domain }}_{{ service_desk_ticket }}"
+            state: absent
+            controller_host: "{{ awx_host }}"
+            controller_oauthtoken: "{{ awx_token }}"
+            validate_certs: "{{ awx_validate_certs }}"
+          register: schedule_deletion_result
+          ignore_errors: true
+
+        - name: "Schedule silme sonucu"
+          ansible.builtin.debug:
+            msg: "Schedule başarıyla silindi: Delete_AWX_Snapshot_{{ domain }}_{{ service_desk_ticket }}"
+          when: schedule_deletion_result is succeeded
+
+        - name: "Schedule silme hatası"
+          ansible.builtin.debug:
+            msg: "UYARI: Schedule silinemedi veya zaten silinmiş: {{ schedule_deletion_result.msg | default('') }}"
+          when: schedule_deletion_result is failed
+
+- name: Raporlama
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    # CREATE Raporları
+    - name: "ÖZET: Snapshot'ı Başarıyla Alınan Sunucular"
+      when: snapshot_action == 'create'
+      ansible.builtin.debug:
+        msg: "{{ snapshotted_vms | default(['Snapshot alınan sunucu yok.']) }}"
+
+    - name: "ÖZET: Snapshot Sayısı Limiti AŞILDIĞI İçin Atlanan Sunucular"
+      when: snapshot_action == 'create'
+      ansible.builtin.debug:
+        msg: "{{ skipped_vms_limit_exceeded | default(['Snapshot limiti nedeniyle atlanan sunucu yok.']) }}"
+
+    - name: "ÖZET: vCenter'larda Bulunamayan Sunucular (CREATE)"
+      when: snapshot_action == 'create' and not_found_vms | length > 0
+      ansible.builtin.debug:
+        msg: "{{ not_found_vms }}"
+
+    - name: "ÖZET: CREATE İşleminde Oluşan Hatalar"
+      when: snapshot_action == 'create' and create_errors | length > 0
+      ansible.builtin.debug:
+        msg: "{{ create_errors }}"
+
+    # DELETE Raporları
+    - name: "ÖZET: Başarıyla Silinen Snapshot'lar"
+      when: snapshot_action == 'delete'
+      ansible.builtin.debug:
+        msg: "{{ deleted_snapshots | default(['Silinen snapshot yok.']) }}"
+
+    - name: "ÖZET: Snapshot Bulunamayan VM'ler"
+      when: snapshot_action == 'delete' and snapshot_not_found | length > 0
+      ansible.builtin.debug:
+        msg: "{{ snapshot_not_found }}"
+
+    - name: "ÖZET: VM Bulunamayan Sunucular"
+      when: snapshot_action == 'delete' and vm_not_found | length > 0
+      ansible.builtin.debug:
+        msg: "{{ vm_not_found }}"
+
+    - name: "ÖZET: Silme İşleminde Oluşan Hatalar"
+      when: snapshot_action == 'delete' and deletion_errors | length > 0
+      ansible.builtin.debug:
+        msg: "{{ deletion_errors }}"
+
+    # Genel Durum Raporu
+    - name: "DURUM: İşlem Özeti"
+      ansible.builtin.debug:
+        msg: |
+          ==========================================
+          İşlem: {{ snapshot_action | upper }}
+          Toplam VM: {{ vm_names | length }}
+          {% if snapshot_action == 'create' %}
+          Başarılı: {{ snapshotted_vms | length }}
+          Limit Aşımı: {{ skipped_vms_limit_exceeded | length }}
+          Bulunamayan: {{ not_found_vms | length }}
+          Hatalar: {{ create_errors | length }}
+          {% else %}
+          Silinen: {{ deleted_snapshots | length }}
+          Snapshot Bulunamayan: {{ snapshot_not_found | length }}
+          VM Bulunamayan: {{ vm_not_found | length }}
+          Diğer Hatalar: {{ deletion_errors | length }}
+          {% endif %}
+          ==========================================

@@ -1,0 +1,62 @@
+---
+# CREATE için VM işleme task'ı
+# Ana playbook'tan include_tasks ile çağrılır
+
+- name: "VM baslangic degiskenlerini ayarla"
+  ansible.builtin.set_fact:
+    vm_found_and_processed: false
+
+- name: "VM vCenterlarda ara"
+  when: not vm_found_and_processed
+  block:
+    - name: "VM bilgilerini al"
+      community.vmware.vmware_guest_info:
+        hostname: "{{ current_vcenter }}"
+        username: "{{ vcenter_user }}"
+        password: "{{ vcenter_password }}"
+        validate_certs: "{{ vcenter_validate_certs }}"
+        name: "{{ current_vm_name }}"
+        schema: "vsphere"
+        properties: ["snapshot"]
+      register: vm_info
+
+    - name: "Snapshot islemlerini yurut"
+      when: vm_info.instance is defined and vm_info.instance
+      block:
+        - name: "Snapshot limiti kontrol et ve yeni snapshot al"
+          when: vm_info.instance.snapshots | length < max_snapshot_count
+          community.vmware.vmware_guest_snapshot:
+            hostname: "{{ current_vcenter }}"
+            username: "{{ vcenter_user }}"
+            password: "{{ vcenter_password }}"
+            validate_certs: "{{ vcenter_validate_certs }}"
+            uuid: "{{ vm_info.instance.uuid }}"
+            state: present
+            snapshot_name: "{{ snapshot_name }}"
+            description: "{{ snapshot_description }}"
+            memory_snapshot: false
+          register: snapshot_result
+
+        - name: "Raporlama listelerini guncelle"
+          ansible.builtin.set_fact:
+            snapshotted_vms: "{{ snapshotted_vms + [current_vm_name] if snapshot_result.changed else snapshotted_vms }}"
+            skipped_vms_limit_exceeded: "{{ skipped_vms_limit_exceeded + [current_vm_name] if not snapshot_result.changed and (vm_info.instance.snapshots | length >= max_snapshot_count) else skipped_vms_limit_exceeded }}"
+            vm_found_and_processed: true
+  rescue:
+    - name: "Hata yakalandi"
+      vars:
+        error_msg: "{{ ansible_failed_result.msg | default('Bilinmeyen hata') }}"
+      ansible.builtin.set_fact:
+        create_errors: "{{ create_errors + [current_vm_name + ' (vCenter: ' + current_vcenter + ') - ' + error_msg] }}"
+      
+    - name: "Hata detayini logla"
+      ansible.builtin.debug:
+        msg: "VM '{{ current_vm_name }}', '{{ current_vcenter }}' üzerinde bulunamadı veya hata oluştu: {{ error_msg }}"
+  loop: "{{ vcenter_hostnames }}"
+  loop_control:
+    loop_var: current_vcenter
+
+- name: "Bulunamayanlar listesine ekle"
+  when: not vm_found_and_processed
+  ansible.builtin.set_fact:
+    not_found_vms: "{{ not_found_vms + [current_vm_name] }}"
