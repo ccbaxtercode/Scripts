@@ -1,0 +1,27 @@
+FROM registry.redhat.io/ansible-automation-platform-24/ee-supported-rhel9:latest
+
+  USER root
+
+  # Install Python dependencies
+  RUN pip install --no-cache-dir \
+      pyVim \
+      pyVmomi \
+      ldap3 \
+      requests \
+      urllib3
+
+  # Install Ansible collections
+  RUN ansible-galaxy collection install \
+      community.vmware \
+      ansible.windows \
+      --strict \
+      --force
+
+  # Copy project files
+  WORKDIR /runner
+  COPY . /runner
+
+  # Set permissions
+  RUN chmod -R 755 /runner
+
+  USER 1001
