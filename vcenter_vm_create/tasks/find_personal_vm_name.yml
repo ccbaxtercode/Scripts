@@ -1,0 +1,69 @@
+---
+# Personal VM için optimized Python script ile isim bulma
+- name: "Personal VM - Python Script ile Uygun İsim Bulma (Optimized)"
+  block:
+    - name: "Python Script Parametrelerini Hazırla"
+      ansible.builtin.set_fact:
+        python_script_params:
+          prefix: "{{ personal_vm_prefix }}"
+          vcenters: "{{ VCENTERS | join(',') }}"
+          datacenters: "{{ DATACENTER_PATHS | join(',') }}"
+          os_family: "{{ temp_os_family }}"
+          ad_server: "{{ ad_query_server[domain] }}"
+          ad_base_dn: "{{ domain_info[domain].ad_base_dn }}"
+
+    - name: "vCenter Listesi Oluştur"
+      ansible.builtin.set_fact:
+        VCENTERS: "{{ vcenter_servers.keys() | map('extract', vcenter_servers) | map(attribute='hostname') | list }}"
+
+    - name: "Datacenter Path Listesi Oluştur"
+      ansible.builtin.set_fact:
+        DATACENTER_PATHS: "{{ vcenter_servers.values() | map(attribute='datacenter') | list }}"
+
+    - name: "Python Script Çalıştır - VM İsim Bulma"
+      ansible.builtin.command:
+        cmd: >
+          python3 {{ role_path }}/files/find_available_vm.py
+          "{{ python_script_params.prefix }}"
+          "{{ python_script_params.vcenters }}"
+          "{{ python_script_params.datacenters }}"
+          "{{ python_script_params.os_family }}"
+          "{{ python_script_params.ad_server }}"
+          "{{ python_script_params.ad_base_dn }}"
+      environment:
+        VC_USER: "{{ vcenter_servers[vcenter_mapping[yerleske][domain]].username }}"
+        VC_PASS: "{{ vcenter_servers[vcenter_mapping[yerleske][domain]].password }}"
+        AD_USER: "{{ domain_info[domain].domain_admin }}"
+        AD_PASS: "{{ domain_info[domain].domain_password }}"
+      register: python_result
+      failed_when: false
+      changed_when: false
+
+    - name: "Python Script Çıktısını Parse Et"
+      ansible.builtin.set_fact:
+        vm_search_result: "{{ python_result.stdout | from_json }}"
+
+    - name: "Script Başarısız mı Kontrol Et"
+      ansible.builtin.fail:
+        msg: "Python script failed: {{ python_result.stderr }}"
+      when: python_result.rc != 0
+
+    - name: "Uygun VM İsmi Bulunamadı - HATA"
+      ansible.builtin.fail:
+        msg: "{{ vm_search_result.reason }}"
+      when: not vm_search_result.available
+
+    - name: "Bulunan VM Bilgilerini Kaydet"
+      ansible.builtin.set_fact:
+        found_vm_name: "{{ vm_search_result.vm_name }}"
+        found_index: "{{ vm_search_result.index }}"
+
+    - name: "Bulunan Personal VM İsmi"
+      ansible.builtin.debug:
+        msg:
+          - "✓ Personal VM ismi bulundu!"
+          - "VM Adı: {{ found_vm_name }}"
+          - "Index: {{ found_index }}"
+          - "Prefix: {{ personal_vm_prefix }}"
+
+  when: is_personal_vm | bool
