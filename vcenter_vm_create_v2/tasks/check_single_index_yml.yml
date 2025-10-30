@@ -1,0 +1,116 @@
+---
+# Tek bir index'i kontrol et: AD → vCenter → Karar
+- name: "[Index {{ '%02d' | format(current_index) }}] Test VM Adı Oluştur"
+  ansible.builtin.set_fact:
+    test_vm_name: "{{ personal_vm_prefix }}{{ '%02d' | format(current_index) }}"
+
+- name: "[Index {{ '%02d' | format(current_index) }}] Kontrol: {{ test_vm_name }}"
+  ansible.builtin.debug:
+    msg: "Kontrol ediliyor: {{ test_vm_name }}"
+
+# ============================================
+# STEP 1: AD CHECK (Windows için)
+# ============================================
+- name: "[Index {{ '%02d' | format(current_index) }}] AD Kontrolü (Windows)"
+  block:
+    - name: "AD Computer Check Role Çağır"
+      ansible.builtin.include_role:
+        name: ad_computer_check
+      vars:
+        computer_name: "{{ test_vm_name }}"
+        domain_admin: "{{ domain_info[domain].domain_admin }}"
+        domain_password: "{{ domain_info[domain].domain_password }}"
+        domain_fqdn: "{{ domain_info[domain].fqdn }}"
+
+    - name: "AD Sonuç"
+      ansible.builtin.debug:
+        msg: "AD sonucu: {{ 'BULUNDU (atlanıyor)' if ad_computer_found else 'BULUNAMADI (devam)' }}"
+
+    - name: "[Index {{ '%02d' | format(current_index) }}] AD'de Var - Atlanıyor"
+      ansible.builtin.debug:
+        msg: "✗ {{ test_vm_name }} AD'de mevcut - bir sonraki index'e geçiliyor"
+      when: ad_computer_found
+
+  when: temp_os_family == 'windows'
+
+# Linux için AD kontrolü atla
+- name: "[Index {{ '%02d' | format(current_index) }}] AD Kontrolü Atlandı (Linux)"
+  ansible.builtin.set_fact:
+    ad_computer_found: false
+  when: temp_os_family == 'linux'
+
+# ============================================
+# STEP 2: vCenter CHECK (Sadece AD'de yoksa)
+# ============================================
+- name: "[Index {{ '%02d' | format(current_index) }}] vCenter Kontrolü"
+  block:
+    - name: "vCenter Parametreleri Hazırla"
+      ansible.builtin.set_fact:
+        vcenter_list: "{{ vcenter_servers.values() | map(attribute='hostname') | list | join(',') }}"
+        datacenter_list: "{{ datacenter_config.values() | map(attribute='datacenter_path') | list | join(',') }}"
+
+    - name: "Python Script - vCenter Check"
+      block:
+        - name: "vCenter Check Script Çalıştır"
+          ansible.builtin.command:
+            cmd: >
+              python3 {{ role_path }}/files/check_vcenter.py
+              "{{ test_vm_name }}"
+              "{{ vcenter_list }}"
+              "{{ datacenter_list }}"
+          environment:
+            VC_USER: "{{ vcenter_servers[vcenter_mapping[yerleske][domain]].username }}"
+            VC_PASS: "{{ vcenter_servers[vcenter_mapping[yerleske][domain]].password }}"
+          register: vcenter_check_result
+          changed_when: false
+
+        - name: "vCenter Sonucu Parse Et"
+          ansible.builtin.set_fact:
+            vcenter_exists: "{{ vcenter_check_result.stdout | from_json | json_query('exists') }}"
+
+      rescue:
+        - name: "vCenter Check Hatası - Güvenli Atla"
+          ansible.builtin.debug:
+            msg: "⚠ vCenter check başarısız oldu, güvenlik için VM var kabul ediliyor (index atlanacak)"
+
+        - name: "vCenter Check Hata Detayı"
+          ansible.builtin.debug:
+            var: vcenter_check_result
+
+        - name: "Güvenli Taraf - VM Var Kabul Et"
+          ansible.builtin.set_fact:
+            vcenter_exists: true
+
+    - name: "vCenter Sonuç"
+      ansible.builtin.debug:
+        msg: "vCenter sonucu: {{ 'BULUNDU (atlanıyor)' if vcenter_exists else 'BULUNAMADI (uygun!)' }}"
+
+    - name: "[Index {{ '%02d' | format(current_index) }}] vCenter'da Var - Atlanıyor"
+      ansible.builtin.debug:
+        msg: "✗ {{ test_vm_name }} vCenter'da mevcut - bir sonraki index'e geçiliyor"
+      when: vcenter_exists
+
+  when: not ad_computer_found
+
+# ============================================
+# STEP 3: DECISION - Boş Index Bulundu mu?
+# ============================================
+- name: "[Index {{ '%02d' | format(current_index) }}] Karar - Boş mu?"
+  block:
+    - name: "✓ Boş Index Bulundu!"
+      ansible.builtin.debug:
+        msg:
+          - "✓✓✓ Kullanılabilir VM ismi bulundu!"
+          - "VM Adı: {{ test_vm_name }}"
+          - "Index: {{ current_index }}"
+          - "AD: Yok"
+          - "vCenter: Yok"
+
+    - name: "Bulunan VM İsmini Kaydet"
+      ansible.builtin.set_fact:
+        found_vm_name: "{{ test_vm_name }}"
+        found_index: "{{ current_index }}"
+
+  when:
+    - not ad_computer_found
+    - not vcenter_exists

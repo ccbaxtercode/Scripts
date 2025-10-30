@@ -1,0 +1,91 @@
+---
+# Personal VM için uygun isim bulma - Preflight + Loop
+- name: "Personal VM - İsim Bulma İşlemi Başlatılıyor"
+  ansible.builtin.debug:
+    msg: "Personal VM ismi aranıyor: {{ personal_vm_prefix }}XX"
+
+# ============================================
+# PREFLIGHT CHECK - vCenter Connectivity
+# ============================================
+- name: "Preflight - vCenter Bağlantı Testi"
+  block:
+    - name: "vCenter Listesi Hazırla"
+      ansible.builtin.set_fact:
+        vcenter_list: "{{ vcenter_servers.values() | map(attribute='hostname') | list | join(',') }}"
+
+    - name: "Python Script - vCenter Preflight Check"
+      ansible.builtin.command:
+        cmd: >
+          python3 {{ role_path }}/files/preflight_vcenters.py
+          "{{ vcenter_list }}"
+      environment:
+        VC_USER: "{{ vcenter_servers[vcenter_mapping[yerleske][domain]].username }}"
+        VC_PASS: "{{ vcenter_servers[vcenter_mapping[yerleske][domain]].password }}"
+      register: preflight_vcenter_result
+      changed_when: false
+
+    - name: "Preflight Sonucu Parse Et"
+      ansible.builtin.set_fact:
+        preflight_vcenter: "{{ preflight_vcenter_result.stdout | from_json }}"
+
+    - name: "Preflight Başarılı"
+      ansible.builtin.debug:
+        msg: "✓ vCenter preflight check başarılı"
+
+  rescue:
+    - name: "Preflight Başarısız - HATA"
+      ansible.builtin.fail:
+        msg: "vCenter preflight check başarısız! {{ preflight_vcenter_result.stderr }}"
+
+# ============================================
+# PREFLIGHT CHECK - AD Connectivity (Windows)
+# ============================================
+- name: "Preflight - AD Bağlantı Testi (Windows)"
+  block:
+    - name: "AD Preflight Test - Dummy VM"
+      ansible.builtin.include_role:
+        name: ad_computer_check
+      vars:
+        computer_name: "PREFLIGHT-TEST-DUMMY-{{ 99999 | random }}"
+        domain_admin: "{{ domain_info[domain].domain_admin }}"
+        domain_password: "{{ domain_info[domain].domain_password }}"
+        domain_fqdn: "{{ domain_info[domain].fqdn }}"
+
+    - name: "AD Preflight Başarılı"
+      ansible.builtin.debug:
+        msg: "✓ AD preflight check başarılı (AD erişimi OK)"
+
+  when: temp_os_family == 'windows'
+
+# ============================================
+# VM NAME SEARCH - Index Loop (01-99)
+# ============================================
+- name: "VM İsim Arama - Index Loop Başlatılıyor"
+  ansible.builtin.debug:
+    msg: "01-99 arası ilk boş index aranıyor..."
+
+- name: "Index Loop - 01'den 99'a Kadar"
+  ansible.builtin.include_tasks: check_single_index.yml
+  loop: "{{ range(1, 100) | list }}"
+  loop_control:
+    loop_var: current_index
+    break_when: found_vm_name is defined
+
+# ============================================
+# RESULT CHECK
+# ============================================
+- name: "Sonuç Kontrolü - VM İsmi Bulundu mu?"
+  block:
+    - name: "✓ VM İsmi Bulundu"
+      ansible.builtin.debug:
+        msg:
+          - "Personal VM ismi başarıyla bulundu!"
+          - "VM Adı: {{ found_vm_name }}"
+          - "Index: {{ found_index }}"
+
+  when: found_vm_name is defined
+
+- name: "✗ VM İsmi Bulunamadı - HATA"
+  ansible.builtin.fail:
+    msg: "Tüm index'ler (01-99) dolu! {{ personal_vm_prefix }} için uygun isim bulunamadı."
+  when: found_vm_name is not defined

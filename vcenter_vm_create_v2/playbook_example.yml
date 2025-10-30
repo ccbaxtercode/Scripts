@@ -1,0 +1,16 @@
+---
+- name: "vCenter VM Oluşturma Otomasyonu"
+  hosts: localhost
+  gather_facts: false
+  
+  roles:
+    - role: vcenter_vm_create
+      # AWX Survey'den gelen değişkenler otomatik olarak geçilir:
+      # - vm_name
+      # - vm_spec
+      # - domain
+      # - yerleske
+      # - os
+      # - username
+      # - service_desk_no
+      # - task

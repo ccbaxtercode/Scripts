@@ -1,0 +1,145 @@
+---
+# vCenter VM Oluşturma Role - Varsayılan Değişkenler
+
+# ============================================
+# vCenter Sunucu Bilgileri
+# ============================================
+vcenter_servers:
+  vcenter1:
+    hostname: "vcenter1.example.com"
+    username: "administrator@vsphere.local"
+    password: "{{ vault_vcenter1_password }}"
+    validate_certs: false
+  vcenter2:
+    hostname: "vcenter2.example.com"
+    username: "administrator@vsphere.local"
+    password: "{{ vault_vcenter2_password }}"
+    validate_certs: false
+
+# ============================================
+# Yerleşke ve Domain'e Göre vCenter Mapping
+# ============================================
+vcenter_mapping:
+  a:
+    domain1: "vcenter1"
+    domain2: "vcenter1"
+  b:
+    domain1: "vcenter1"
+    domain2: "vcenter2"
+  c:
+    domain1: "vcenter2"
+    domain2: "vcenter2"
+
+# ============================================
+# Datacenter Konfigürasyonu (Yerleşke Bazlı)
+# ============================================
+# vCenter1: 2 datacenter (a, b)
+# vCenter2: 1 datacenter (c)
+datacenter_config:
+  a:
+    datacenter_name: "DC-A"
+    datacenter_path: "/DC-A/vm"
+    cluster: "Cluster-A"
+    folders:
+      clients: "Clients"
+      servers: "Servers"
+      templates: "Templates"
+    networks:
+      client: "VLAN-A-Client"
+      server: "VLAN-A-Server"
+  b:
+    datacenter_name: "DC-B"
+    datacenter_path: "/DC-B/vm"
+    cluster: "Cluster-B"
+    folders:
+      clients: "Clients"
+      servers: "Servers"
+      templates: "Templates"
+    networks:
+      client: "VLAN-B-Client"
+      server: "VLAN-B-Server"
+  c:
+    datacenter_name: "DC-C"
+    datacenter_path: "/DC-C/vm"
+    cluster: "Cluster-C"
+    folders:
+      clients: "Clients"
+      servers: "Servers"
+      templates: "Templates"
+    networks:
+      client: "VLAN-C-Client"
+      server: "VLAN-C-Server"
+
+# ============================================
+# VM Spec Tanımları
+# ============================================
+vm_specs:
+  standart:
+    cpu: 2
+    memory_mb: 4096
+    disk_gb: 50
+  advanced:
+    cpu: 4
+    memory_mb: 8192
+    disk_gb: 100
+  dev:
+    cpu: 2
+    memory_mb: 2048
+    disk_gb: 30
+
+# ============================================
+# OS Template İsimleri
+# ============================================
+os_templates:
+  windows10: "Template-Windows10-Latest"
+  ubuntu2004: "Template-Ubuntu-20.04"
+  ubuntu2204: "Template-Ubuntu-22.04"
+  centos: "Template-CentOS-8"
+
+# ============================================
+# OS Tipi Belirleme (Domain Join için)
+# ============================================
+os_family_mapping:
+  windows10: "windows"
+  ubuntu2004: "linux"
+  ubuntu2204: "linux"
+  centos: "linux"
+
+# ============================================
+# Domain Bilgileri
+# ============================================
+domain_info:
+  domain1:
+    fqdn: "domain1.local"
+    ad_base_dn: "DC=domain1,DC=local"
+    ou_path: "OU=Servers,OU=Production,DC=domain1,DC=local"
+    ou_path_client: "OU=Workstations,OU=Production,DC=domain1,DC=local"
+    domain_admin: "{{ vault_domain1_admin }}"
+    domain_password: "{{ vault_domain1_password }}"
+  domain2:
+    fqdn: "domain2.local"
+    ad_base_dn: "DC=domain2,DC=local"
+    ou_path: "OU=Servers,OU=Production,DC=domain2,DC=local"
+    ou_path_client: "OU=Workstations,OU=Production,DC=domain2,DC=local"
+    domain_admin: "{{ vault_domain2_admin }}"
+    domain_password: "{{ vault_domain2_password }}"
+
+# ============================================
+# Active Directory Sorgu Sunucusu
+# ============================================
+ad_query_server:
+  domain1: "dc01.domain1.local"
+  domain2: "dc01.domain2.local"
+
+# ============================================
+# Genel Ayarlar
+# ============================================
+vm_settings:
+  guest_id_mapping:
+    windows10: "windows9_64Guest"
+    ubuntu2004: "ubuntu64Guest"
+    ubuntu2204: "ubuntu64Guest"
+    centos: "centos8_64Guest"
+  hardware_version: 17
+  wait_for_ip: true
+  wait_timeout: 600

@@ -46,8 +46,8 @@
 
   when: is_personal_vm | bool
 
-# Personal VM için mevcut VM'leri kontrol et ve index bul
-- name: "Personal VM - Uygun İsim Bulma (Python Script - Optimized)"
+# Personal VM için uygun isim bulma (Preflight + Loop)
+- name: "Personal VM - Uygun İsim Bulma (Preflight + AD/vCenter Check)"
   ansible.builtin.include_tasks: find_personal_vm_name.yml
   when: is_personal_vm | bool
 
@@ -69,9 +69,17 @@
   ansible.builtin.set_fact:
     selected_vcenter: "{{ vcenter_servers[selected_vcenter_name] }}"
 
-- name: "Network Adapter Belirleme"
+- name: "Datacenter Konfigürasyonu Belirleme"
   ansible.builtin.set_fact:
-    selected_network: "{{ network_mapping[selected_vcenter_name][domain] }}"
+    selected_datacenter_config: "{{ datacenter_config[yerleske] }}"
+
+- name: "Network Adapter Belirleme (OS Type Bazlı)"
+  ansible.builtin.set_fact:
+    selected_network: "{{ selected_datacenter_config.networks.client if os_type == 'client' else selected_datacenter_config.networks.server }}"
+
+- name: "VM Folder Belirleme (OS Type Bazlı)"
+  ansible.builtin.set_fact:
+    selected_folder: "{{ selected_datacenter_config.datacenter_path }}/{{ selected_datacenter_config.folders.clients if os_type == 'client' else selected_datacenter_config.folders.servers }}"
 
 - name: "VM Spec Belirleme"
   ansible.builtin.set_fact:
@@ -111,8 +119,9 @@
     msg:
       - "VM Adı: {{ final_vm_name }}{{ ' (Personal VM - Otomatik Oluşturuldu)' if is_personal_vm else '' }}"
       - "vCenter: {{ selected_vcenter_name }} ({{ selected_vcenter.hostname }})"
-      - "Datacenter: {{ selected_vcenter.datacenter }}"
-      - "Cluster: {{ selected_vcenter.cluster }}"
+      - "Datacenter: {{ selected_datacenter_config.datacenter_name }}"
+      - "Cluster: {{ selected_datacenter_config.cluster }}"
+      - "Folder: {{ selected_folder }}"
       - "Network: {{ selected_network }}"
       - "Template: {{ vm_template }}"
       - "CPU: {{ vm_cpu }}"
@@ -126,89 +135,8 @@
       - "Requested By: {{ username }}"
 
 # ============================================
-# ADIM 2: VM ADI KONTROLÜ
+# SONRAKI ADIMA HAZIRLIK
 # ============================================
-- name: "Adım 2 - VM Adı Kontrol Ediliyor"
-  ansible.builtin.debug:
-    msg: "vCenter ve Active Directory'de VM adı kontrol ediliyor..."
-
-# vCenter'da VM Kontrolü
-- name: "vCenter'da VM Varlık Kontrolü"
-  community.vmware.vmware_guest_info:
-    hostname: "{{ selected_vcenter.hostname }}"
-    username: "{{ selected_vcenter.username }}"
-    password: "{{ selected_vcenter.password }}"
-    validate_certs: "{{ selected_vcenter.validate_certs }}"
-    datacenter: "{{ selected_vcenter.datacenter }}"
-    name: "{{ final_vm_name }}"
-  register: vcenter_vm_check
-  failed_when: false
-  delegate_to: localhost
-
-- name: "vCenter Kontrolü - VM Zaten Var mı?"
-  ansible.builtin.fail:
-    msg: "HATA: '{{ final_vm_name }}' isimli VM zaten vCenter'da mevcut! ({{ selected_vcenter.hostname }})"
-  when: vcenter_vm_check.instance is defined
-
-- name: "vCenter Kontrolü - Başarılı"
-  ansible.builtin.debug:
-    msg: "✓ vCenter kontrolü başarılı - VM adı kullanılabilir"
-  when: vcenter_vm_check.instance is not defined
-
-# Active Directory Kontrolü (Sadece Windows için)
-- name: "Active Directory Kontrolü Gerekiyor mu?"
-  ansible.builtin.debug:
-    msg: "{{ 'Windows makine - AD kontrolü yapılacak' if requires_domain_join else 'Linux makine - AD kontrolü atlanıyor' }}"
-
-- name: "Active Directory'de Computer Object Kontrolü (Windows için)"
-  block:
-    - name: "AD'de Computer Object Var mı Kontrol Et"
-      ansible.windows.win_powershell:
-        script: |
-          $computerName = "{{ final_vm_name }}"
-          try {
-              $computer = Get-ADComputer -Identity $computerName -ErrorAction Stop
-              Write-Output "EXISTS:$($computer.DistinguishedName)"
-          } catch [Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException] {
-              Write-Output "NOT_FOUND"
-          } catch {
-              Write-Output "ERROR:$($_.Exception.Message)"
-          }
-      register: ad_check_result
-      delegate_to: "{{ ad_query_server[domain] }}"
-
-    - name: "AD Sorgu Sonucu"
-      ansible.builtin.debug:
-        var: ad_check_result.output
-
-    - name: "AD Kontrolü - Computer Object Zaten Var mı?"
-      ansible.builtin.fail:
-        msg: "HATA: '{{ final_vm_name }}' isimli computer object zaten Active Directory'de mevcut!"
-      when: "'EXISTS:' in ad_check_result.output[0]"
-
-    - name: "AD Kontrolü - Başarılı"
-      ansible.builtin.debug:
-        msg: "✓ Active Directory kontrolü başarılı - Computer object mevcut değil"
-      when: "'NOT_FOUND' in ad_check_result.output[0]"
-
-    - name: "AD Kontrolü - Hata Var mı?"
-      ansible.builtin.fail:
-        msg: "HATA: AD sorgusunda hata oluştu - {{ ad_check_result.output[0] }}"
-      when: "'ERROR:' in ad_check_result.output[0]"
-
-  when: requires_domain_join | bool
-
-- name: "Linux Makine - AD Kontrolü Atlandı"
-  ansible.builtin.debug:
-    msg: "✓ Linux makine olduğu için AD kontrolü yapılmadı"
-  when: not requires_domain_join | bool
-
-# Kontroller Başarılı
-- name: "Tüm Kontroller Başarılı"
-  ansible.builtin.debug:
-    msg: "✓✓✓ Tüm ön kontroller başarılı! VM oluşturma işlemine devam edilebilir."
-
-# Sonraki Adımlar için hazırlık
 - name: "Sonraki Adıma Hazırlık"
   ansible.builtin.set_fact:
     vm_checks_passed: true
@@ -218,9 +146,10 @@
       is_personal: "{{ is_personal_vm }}"
       vcenter: "{{ selected_vcenter }}"
       vcenter_name: "{{ selected_vcenter_name }}"
-      datacenter: "{{ selected_vcenter.datacenter }}"
-      cluster: "{{ selected_vcenter.cluster }}"
-      folder: "{{ selected_vcenter.folder }}"
+      datacenter: "{{ selected_datacenter_config.datacenter_name }}"
+      datacenter_path: "{{ selected_datacenter_config.datacenter_path }}"
+      cluster: "{{ selected_datacenter_config.cluster }}"
+      folder: "{{ selected_folder }}"
       network: "{{ selected_network }}"
       template: "{{ vm_template }}"
       guest_id: "{{ vm_guest_id }}"
@@ -231,5 +160,6 @@
       os_type: "{{ os_type }}"
       network_type: "{{ network_type }}"
       requires_domain_join: "{{ requires_domain_join }}"
+      target_ou: "{{ target_ou | default('') }}"
       service_desk_no: "{{ service_desk_no }}"
       requested_by: "{{ username }}"

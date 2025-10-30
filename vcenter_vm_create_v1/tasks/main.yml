@@ -46,8 +46,8 @@
 
   when: is_personal_vm | bool
 
-# Personal VM için mevcut VM'leri kontrol et ve index bul
-- name: "Personal VM - Uygun İsim Bulma (Python Script - Optimized)"
+# Personal VM için uygun isim bulma (Preflight + Loop)
+- name: "Personal VM - Uygun İsim Bulma (Preflight + AD/vCenter Check)"
   ansible.builtin.include_tasks: find_personal_vm_name.yml
   when: is_personal_vm | bool
 
