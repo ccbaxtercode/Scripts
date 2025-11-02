@@ -1,0 +1,36 @@
+---
+galaxy_info:
+  role_name: api_request
+  author: Your Name
+  description: NTLM ve Basic Auth destekli API çağrı role'ü. Retry, timeout, SSL kontrolü ve detaylı logging içerir.
+  company: Your Company
+  
+  license: MIT
+  
+  min_ansible_version: "2.9"
+  
+  platforms:
+    - name: Ubuntu
+      versions:
+        - focal
+        - jammy
+    - name: Debian
+      versions:
+        - bullseye
+        - bookworm
+    - name: EL
+      versions:
+        - 7
+        - 8
+        - 9
+  
+  galaxy_tags:
+    - api
+    - rest
+    - http
+    - ntlm
+    - authentication
+    - requests
+    - web
+
+dependencies: []

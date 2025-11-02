@@ -1,0 +1,140 @@
+---
+# Örnek 1: Basit GET isteği (NTLM)
+- name: API GET isteği örneği
+  hosts: localhost
+  gather_facts: no
+  
+  vars_files:
+    - vars/vault.yml
+  
+  roles:
+    - role: api_request
+      api_url: "https://api.example.com/users"
+      api_method: "GET"
+      api_auth_type: "ntlm"
+      api_username: "myuser"
+      api_password: "{{ vault_api_password }}"
+      api_domain: "CORP"
+      api_verify_ssl: false
+
+---
+# Örnek 2: POST isteği ile JSON body (Basic Auth)
+- name: API POST isteği örneği
+  hosts: localhost
+  gather_facts: no
+  
+  vars_files:
+    - vars/vault.yml
+  
+  roles:
+    - role: api_request
+      api_url: "https://api.example.com/users"
+      api_method: "POST"
+      api_auth_type: "basic"
+      api_username: "admin"
+      api_password: "{{ vault_api_password }}"
+      api_headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      api_data:
+        name: "John Doe"
+        email: "john@example.com"
+        role: "developer"
+
+---
+# Örnek 3: Çoklu API çağrısı (loop ile)
+- name: Çoklu API çağrısı örneği
+  hosts: localhost
+  gather_facts: no
+  
+  vars_files:
+    - vars/vault.yml
+  
+  tasks:
+    - name: Her kullanıcı için API çağrısı
+      include_role:
+        name: api_request
+      vars:
+        api_url: "https://api.example.com/users/{{ item.id }}"
+        api_method: "PUT"
+        api_auth_type: "ntlm"
+        api_username: "admin"
+        api_password: "{{ vault_api_password }}"
+        api_domain: "CORP"
+        api_data:
+          status: "active"
+      loop:
+        - { id: 1 }
+        - { id: 2 }
+        - { id: 3 }
+
+---
+# Örnek 4: Response'u kullanma
+- name: API yanıtını işleme örneği
+  hosts: localhost
+  gather_facts: no
+  
+  vars_files:
+    - vars/vault.yml
+  
+  tasks:
+    - name: Kullanıcı listesini getir
+      include_role:
+        name: api_request
+      vars:
+        api_url: "https://api.example.com/users"
+        api_method: "GET"
+        api_auth_type: "basic"
+        api_username: "{{ vault_username }}"
+        api_password: "{{ vault_api_password }}"
+    
+    - name: API yanıtını göster
+      debug:
+        msg: "Kullanıcı sayısı: {{ api_response.body | length }}"
+    
+    - name: İlk kullanıcıyı göster
+      debug:
+        var: api_response.body[0]
+      when: api_response.body | length > 0
+
+---
+# Örnek 5: Özel timeout ve retry ayarları
+- name: Özel yapılandırma örneği
+  hosts: localhost
+  gather_facts: no
+  
+  vars_files:
+    - vars/vault.yml
+  
+  roles:
+    - role: api_request
+      api_url: "https://slow-api.example.com/data"
+      api_method: "GET"
+      api_auth_type: "ntlm"
+      api_username: "myuser"
+      api_password: "{{ vault_api_password }}"
+      api_domain: "CORP"
+      api_timeout_connection: 15
+      api_timeout_read: 60
+      api_retry_count: 5
+      api_fail_on_error: false  # Hatayı görmezden gel
+
+---
+# Örnek 6: DELETE isteği
+- name: API DELETE örneği
+  hosts: localhost
+  gather_facts: no
+  
+  vars_files:
+    - vars/vault.yml
+  
+  roles:
+    - role: api_request
+      api_url: "https://api.example.com/users/123"
+      api_method: "DELETE"
+      api_auth_type: "basic"
+      api_username: "admin"
+      api_password: "{{ vault_api_password }}"
+      api_accepted_status_codes:
+        - 200
+        - 204  # DELETE için yaygın

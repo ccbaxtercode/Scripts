@@ -1,0 +1,29 @@
+# Ansible
+*.retry
+.vault_pass
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Vault files (development)
+tests/vault.yml
+examples/vars/vault.yml

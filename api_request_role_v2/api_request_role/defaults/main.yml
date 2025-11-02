@@ -1,0 +1,49 @@
+---
+# API endpoint yapılandırması
+api_url: "https://example.com/api/endpoint"
+api_method: "GET"  # GET, POST, PUT, DELETE, PATCH
+
+# Authentication
+api_auth_type: "ntlm"  # ntlm veya basic
+api_username: "myuser"
+api_password: ""  # Vault kullanın: {{ vault_api_password }}
+api_domain: "CORP"  # NTLM için gerekli
+
+# Request yapılandırması
+api_headers: {}
+  # Accept: "application/json"
+  # Content-Type: "application/json"
+
+api_data: {}  # POST/PUT için request body
+
+# Timeout yapılandırması (saniye)
+api_timeout_connection: 10
+api_timeout_read: 30
+
+# SSL/TLS
+api_verify_ssl: true
+
+# Logging
+api_no_log: true  # Hassas bilgileri loglama
+
+# Retry yapılandırması
+api_retry_enabled: true
+api_retry_count: 3
+api_retry_backoff_factor: 1
+api_retry_status_codes:
+  - 429
+  - 500
+  - 502
+  - 503
+  - 504
+
+# HTTP status kontrolü
+api_fail_on_error: true  # 4xx/5xx hatalarında fail et
+api_accepted_status_codes:
+  - 200
+  - 201
+  - 202
+  - 204
+
+# Script yolu
+api_script_path: "{{ role_path }}/files/api_request.py"

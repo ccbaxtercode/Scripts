@@ -1,0 +1,67 @@
+---
+- name: API çağrısı ve hata yönetimi
+  block:
+    - name: Python bağımlılıklarını kontrol et
+      ansible.builtin.command: python3 -c "import requests; import requests_ntlm"
+      register: python_check
+      changed_when: false
+      failed_when: false
+
+    - name: Python bağımlılıkları eksikse hata ver
+      ansible.builtin.fail:
+        msg: |
+          Python bağımlılıkları eksik!
+          Kurulum: pip3 install requests requests-ntlm
+      when: python_check.rc != 0
+
+    - name: Environment değişkenlerini hazırla
+      ansible.builtin.set_fact:
+        api_environment:
+          API_URL: "{{ api_url }}"
+          API_METHOD: "{{ api_method | upper }}"
+          API_AUTH_TYPE: "{{ api_auth_type | lower }}"
+          API_USERNAME: "{{ api_username }}"
+          API_PASSWORD: "{{ api_password }}"
+          API_DOMAIN: "{{ api_domain | default('') }}"
+          API_HEADERS: "{{ api_headers | to_json }}"
+          API_DATA: "{{ api_data | to_json if api_data | length > 0 else '' }}"
+          API_TIMEOUT: "{{ api_timeout_connection }},{{ api_timeout_read }}"
+          API_VERIFY_SSL: "{{ api_verify_ssl | string | lower }}"
+
+    - name: API çağrısını yap
+      ansible.builtin.command: python3 {{ api_script_path }}
+      environment: "{{ api_environment }}"
+      register: api_result
+      no_log: "{{ api_no_log }}"
+      failed_when: api_result.rc not in [0]
+
+    - name: JSON çıktıyı parse et
+      ansible.builtin.set_fact:
+        api_response: "{{ api_result.stdout | from_json }}"
+
+    - name: API yanıt bilgisini göster
+      ansible.builtin.debug:
+        msg: "API Response: HTTP {{ api_response.status_code }} ({{ api_response.elapsed_seconds }}s)"
+      when: not api_no_log
+
+    - name: HTTP hata kontrolü (4xx/5xx)
+      ansible.builtin.fail:
+        msg: "API hatası: HTTP {{ api_response.status_code }} - {{ api_response.body | default('No body') }}"
+      when:
+        - api_fail_on_error | bool
+        - api_response.status_code not in api_accepted_status_codes
+        - api_response.status_code >= 400
+
+  rescue:
+    - name: Hata durumunu logla
+      ansible.builtin.debug:
+        msg: |
+          ❌ API çağrısı başarısız!
+          URL: {{ api_url }}
+          Method: {{ api_method }}
+          Return Code: {{ api_result.rc | default('N/A') }}
+          Error: {{ api_result.stderr | default('Unknown error') }}
+
+    - name: Hatayı yeniden fırlat
+      ansible.builtin.fail:
+        msg: "API çağrısı başarısız: {{ api_result.stderr | default('Unknown error') }}"

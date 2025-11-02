@@ -1,0 +1,16 @@
+---
+skip_list:
+  - '106'  # Role name {} does not match ``^[a-z][a-z0-9_]+$`` pattern
+  - '204'  # Lines should be no longer than 160 chars
+  - '208'  # File permissions unset or incorrect
+  - 'risky-file-permissions'  # File permissions unset or incorrect
+  - 'no-changed-when'  # Commands should not change things if nothing needs doing
+
+warn_list:
+  - 'experimental'
+  - 'role-name'
+
+exclude_paths:
+  - .github/
+  - tests/
+  - examples/
