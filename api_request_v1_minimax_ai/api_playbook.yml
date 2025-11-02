@@ -1,0 +1,131 @@
+---
+- name: API çağrısı yap - Gelişmiş sürüm (retry mekanizması ile)
+  hosts: localhost
+  gather_facts: no
+
+  tasks:
+    - name: Environment değişkenlerini hazırla
+      set_fact:
+        api_config:
+          # 🔹 Temel API ayarları
+          API_URL: "{{ api_url | default('https://api.example.com/items') }}"
+          API_METHOD: "{{ api_method | default('GET') }}"
+          API_AUTH_TYPE: "{{ api_auth_type | default('basic') }}"
+          API_USERNAME: "{{ api_username }}"
+          API_PASSWORD: "{{ api_password }}"
+          
+          # 🔹 Opsiyonel ayarlar
+          API_DOMAIN: "{{ api_domain | default(omit) }}"
+          API_HEADERS: "{{ api_headers | default(omit) }}"
+          API_DATA: "{{ api_data | default(omit) }}"
+          
+          # 🔹 Retry ve timeout ayarları
+          API_TIMEOUT: "{{ api_timeout | default(30) }}"
+          API_MAX_RETRIES: "{{ api_max_retries | default(3) }}"
+          API_RETRY_DELAY: "{{ api_retry_delay | default(5) }}"
+          API_RETRY_BACKOFF: "{{ api_retry_backoff | default('true') }}"
+          
+          # 🔹 SSL ayarları
+          API_VERIFY_SSL: "{{ api_verify_ssl | default('true') }}"
+
+    - name: API çağrısı yap (retry mekanizması ile)
+      no_log: true
+      environment: "{{ api_config }}"
+      command: python3 "{{ playbook_dir }}/api_request.py"
+      register: api_result
+      failed_when: api_result.rc not in [0]
+      retries: 3
+      delay: 10
+
+    - name: JSON çıktıyı parse et
+      set_fact:
+        api_json: "{{ api_result.stdout | from_json }}"
+
+    - name: API sonuç özeti
+      debug:
+        msg: |
+          🔹 API Çağrısı Özeti:
+          └─ HTTP Durum Kodu: {{ api_json.status_code }}
+          └─ Deneme Sayısı: {{ api_json.attempt | default('N/A') }}
+          └─ URL: {{ api_json.url | default('N/A') }}
+          └─ Method: {{ api_json.method | default('N/A') }}
+          └─ Başarılı: {{ '✅' if api_json.ok else '❌' }}
+
+    - name: Başarılı ise cevap göster
+      when: api_json.ok
+      debug:
+        msg: |
+          🎉 API Başarılı!
+          📊 HTTP Kodu: {{ api_json.status_code }}
+          📝 Yanıt:
+          {{ api_json.body | to_nice_yaml }}
+
+    - name: Başarısız ise hata detayı göster
+      when: not api_json.ok
+      debug:
+        msg: |
+          ❌ API Başarısız!
+          🚫 HTTP Kodu: {{ api_json.status_code | default('N/A') }}
+          💥 Hata: {{ api_json.error | default('Bilinmeyen hata') }}
+          🔢 Deneme: {{ api_json.attempts | default('N/A') }}
+
+    - name: HTTP headerlarını göster
+      when: api_json.headers is defined
+      debug:
+        msg: |
+          📋 Yanıt Headerları:
+          {{ api_json.headers | to_nice_yaml }}
+
+    - name: Hata durumunda playbook'u durdur
+      fail:
+        msg: "API çağrısı başarısız - playbook durduruluyor"
+      when: not api_json.ok
+
+    # 🔹 Özel kullanım senaryoları
+    - name: API sonucunu dosyaya kaydet
+      copy:
+        content: "{{ api_result.stdout }}"
+        dest: "/tmp/api_response_{{ ansible_date_time.epoch }}.json"
+      when: api_json.ok
+
+    - name: API performans metriklerini hesapla
+      when: api_json.ok
+      set_fact:
+        api_metrics:
+          response_time: "{{ api_result.delta.total_seconds() | round(2) }}"
+          status_code: "{{ api_json.status_code }}"
+          data_size: "{{ api_result.stdout | length }} bytes"
+          attempts_used: "{{ api_json.attempt | default(1) }}"
+      
+    - name: Performans metriklerini göster
+      debug:
+        var: api_metrics
+      when: api_json.ok
+
+
+# 🔹 Örnek kullanım senaryoları
+# 
+# 1. Basic Authentication ile GET isteği:
+#    ansible-playbook api_playbook.yml \
+#      -e "api_url=https://api.example.com/users \
+#          api_auth_type=basic \
+#          api_username=admin \
+#          api_password=secret123"
+#
+# 2. NTLM Authentication ile POST isteği:
+#    ansible-playbook api_playbook.yml \
+#      -e "api_url=https://api.example.com/create \
+#          api_auth_type=ntlm \
+#          api_username=user1 \
+#          api_password=secret123 \
+#          api_domain=CORP \
+#          api_method=POST \
+#          api_data='{\"name\": \"test\", \"value\": 123}'"
+#
+# 3. Self-signed sertifika ile timeout ve retry ayarları:
+#    ansible-playbook api_playbook.yml \
+#      -e "api_url=https://dev-api.example.com \
+#          api_verify_ssl=false \
+ api_timeout=10 \
+          api_max_retries=5 \
+          api_retry_delay=3"

@@ -1,0 +1,54 @@
+---
+- name: API çağrısı yap ve JSON sonucu işle (Geliştirilmiş)
+  hosts: localhost
+  gather_facts: no
+
+  tasks:
+    - name: API çağrısı ve hata yönetimi
+      block:
+        - name: Python script ile API çağrısı
+          no_log: true
+          environment:
+            API_URL: "https://example.com/api/items"
+            API_METHOD: "GET"
+            API_AUTH_TYPE: "ntlm"
+            API_USERNAME: "myuser"
+            API_PASSWORD: "{{ vault_api_password }}"
+            API_DOMAIN: "CORP"
+            API_HEADERS: '{"Accept": "application/json"}'
+            # API_DATA: '{"key": "value"}'   # POST/PUT için body
+            API_TIMEOUT: "10,30"              # connection_timeout,read_timeout (veya tek değer: "20")
+            API_VERIFY_SSL: "false"           # self-signed sertifika kabul et
+          command: python3 "{{ playbook_dir }}/scripts/api_request_improved.py"
+          register: api_result
+          failed_when: api_result.rc not in [0]
+
+        - name: JSON çıktıyı parse et
+          set_fact:
+            api_json: "{{ api_result.stdout | from_json }}"
+
+        - name: HTTP kodunu göster
+          debug:
+            msg: "Durum kodu: {{ api_json.status_code }} ({{ api_json.elapsed_seconds }}s)"
+
+        - name: HTTP hata kontrolü (4xx/5xx)
+          fail:
+            msg: "API hatası: HTTP {{ api_json.status_code }} - {{ api_json.body }}"
+          when: api_json.status_code >= 400
+
+        - name: API cevabından örnek veri göster
+          debug:
+            var: api_json.body
+
+      rescue:
+        - name: Hata durumunda logla
+          debug:
+            msg: |
+              ❌ API çağrısı başarısız!
+              Return Code: {{ api_result.rc | default('N/A') }}
+              Stdout: {{ api_result.stdout | default('') }}
+              Stderr: {{ api_result.stderr | default('') }}
+
+        - name: İşlemi sonlandır
+          fail:
+            msg: "API çağrısı başarısız olduğu için playbook sonlandırıldı"

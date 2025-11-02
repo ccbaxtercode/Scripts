@@ -1,0 +1,16 @@
+# Python Requirements
+# Bu dosyayı requirements.txt olarak kaydedin ve kurun:
+# pip install -r requirements.txt
+
+# Temel HTTP client
+requests>=2.31.0
+
+# NTLM Authentication desteği
+requests-ntlm>=1.2.0
+
+# Ansible modülleri (isteğe bağlı)
+# ansible>=8.0.0
+
+# Development araçları (isteğe bağlı)
+# pytest>=7.4.0
+# requests-mock>=1.11.0

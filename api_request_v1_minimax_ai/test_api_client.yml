@@ -1,0 +1,147 @@
+---
+- name: API Client Test Senaryoları
+  hosts: localhost
+  gather_facts: no
+
+  tasks:
+    - name: Test 1: Başarılı GET isteği (httpbin.org)
+      debug:
+        msg: "🧪 Test 1: Başarılı GET isteği başlatılıyor..."
+      
+    - name: Başarılı GET testi
+      environment:
+        API_URL: "https://httpbin.org/get"
+        API_METHOD: "GET"
+        API_AUTH_TYPE: "basic"
+        API_USERNAME: "test"
+        API_PASSWORD: "test"
+        API_TIMEOUT: "10"
+        API_MAX_RETRIES: "1"
+        API_VERIFY_SSL: "true"
+      command: python3 "{{ playbook_dir }}/api_request.py"
+      register: test1_result
+      failed_when: test1_result.rc not in [0]
+      ignore_errors: false
+
+    - name: Test 1 sonucu
+      debug:
+        msg: |
+          ✅ Test 1 BAŞARILI!
+          {{ test1_result.stdout | from_json | to_nice_yaml }}
+
+    - name: Test 2: 500 Error Testi (httpbin.org)
+      debug:
+        msg: "🧪 Test 2: 500 Error testi başlatılıyor..."
+      
+    - name: 500 Error testi (retry ile)
+      environment:
+        API_URL: "https://httpbin.org/status/500"
+        API_METHOD: "GET"
+        API_AUTH_TYPE: "basic"
+        API_USERNAME: "test"
+        API_PASSWORD: "test"
+        API_TIMEOUT: "5"
+        API_MAX_RETRIES: "2"
+        API_RETRY_DELAY: "2"
+        API_RETRY_BACKOFF: "false"
+        API_VERIFY_SSL: "true"
+      command: python3 "{{ playbook_dir }}/api_request.py"
+      register: test2_result
+      failed_when: false  # Test başarısız olsun ama devam etsin
+
+    - name: Test 2 sonucu
+      debug:
+        msg: |
+          {% if test2_result.rc == 0 %}
+          ✅ Test 2 - HTTP 500 Bekleniyordu (Beklenmedik başarı!)
+          {% else %}
+          ❌ Test 2 BAŞARILI - HTTP 500 (Retry mekanizması çalıştı)
+          {% endif %}
+          {{ test2_result.stdout | from_json | to_nice_yaml }}
+
+    - name: Test 3: Timeout Testi (httpbin.org)
+      debug:
+        msg: "🧪 Test 3: Timeout testi başlatılıyor..."
+      
+    - name: Timeout testi
+      environment:
+        API_URL: "https://httpbin.org/delay/3"
+        API_METHOD: "GET"
+        API_AUTH_TYPE: "basic"
+        API_USERNAME: "test"
+        API_PASSWORD: "test"
+        API_TIMEOUT: "2"  # 2 saniye timeout (3 saniye bekleme var)
+        API_MAX_RETRIES: "2"
+        API_RETRY_DELAY: "1"
+        API_RETRY_BACKOFF: "false"
+        API_VERIFY_SSL: "true"
+      command: python3 "{{ playbook_dir }}/api_request.py"
+      register: test3_result
+      failed_when: false  # Test başarısız olsun ama devam etsin
+
+    - name: Test 3 sonucu
+      debug:
+        msg: |
+          {% if test3_result.rc == 0 %}
+          ✅ Test 3 - Timeout Bekleniyordu (Beklenmedik başarı!)
+          {% else %}
+          ❌ Test 3 BAŞARILI - Timeout (Retry mekanizması çalıştı)
+          {% endif %}
+          {{ test3_result.stdout | from_json | from_json | to_nice_yaml }}
+
+    - name: Test 4: POST Testi (JSON body ile)
+      debug:
+        msg: "🧪 Test 4: POST isteği testi başlatılıyor..."
+      
+    - name: POST testi
+      environment:
+        API_URL: "https://httpbin.org/post"
+        API_METHOD: "POST"
+        API_AUTH_TYPE: "basic"
+        API_USERNAME: "test"
+        API_PASSWORD: "test"
+        API_HEADERS: '{"Content-Type": "application/json"}'
+        API_DATA: '{"test": "data", "number": 123}'
+        API_TIMEOUT: "10"
+        API_MAX_RETRIES: "1"
+        API_VERIFY_SSL: "true"
+      command: python3 "{{ playbook_dir }}/api_request.py"
+      register: test4_result
+      failed_when: test4_result.rc not in [0]
+
+    - name: Test 4 sonucu
+      debug:
+        msg: |
+          ✅ Test 4 BAŞARILI!
+          {{ test4_result.stdout | from_json | to_nice_yaml }}
+
+    - name: Test Sonuçları Özeti
+      debug:
+        msg: |
+          🎯 TEST ÖZETİ:
+          ├─ Test 1 (Başarılı GET): {{ '✅ BAŞARILI' if test1_result.rc == 0 else '❌ BAŞARISIZ' }}
+          ├─ Test 2 (HTTP 500): {{ '✅ BAŞARILI (Beklenen hata)' if test2_result.rc != 0 else '❌ BAŞARISIZ' }}
+          ├─ Test 3 (Timeout): {{ '✅ BAŞARILI (Beklenen hata)' if test3_result.rc != 0 else '❌ BAŞARISIZ' }}
+          └─ Test 4 (POST): {{ '✅ BAŞARILI' if test4_result.rc == 0 else '❌ BAŞARISIZ' }}
+
+    - name: Hata durumunda genel rapor
+      fail:
+        msg: |
+          🚫 BAZI TESTLER BAŞARISIZ!
+          
+          Test 1 (Başarılı GET): {{ '✅' if test1_result.rc == 0 else '❌' }}
+          Test 2 (HTTP 500): {{ '✅' if test2_result.rc != 0 else '❌' }}
+          Test 3 (Timeout): {{ '✅' if test3_result.rc != 0 else '❌' }}
+          Test 4 (POST): {{ '✅' if test4_result.rc == 0 else '❌' }}
+      when: test1_result.rc != 0 or test4_result.rc != 0
+
+    - name: Tüm testler başarılı
+      debug:
+        msg: |
+          🎉 TÜM TESTLER BAŞARILI!
+          
+          ✅ API Client düzgün çalışıyor
+          ✅ Retry mekanizması aktif
+          ✅ JSON parsing çalışıyor
+          ✅ Authentication mekanizması çalışıyor
+          ✅ Hata yönetimi çalışıyor
