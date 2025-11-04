@@ -1,0 +1,262 @@
+# Dosya: roles/vcenter_vm_create/tasks/ad_query_example.yml
+# Açıklama: AD Query Kullanım Örneği
+
+---
+# ============================================
+# ÖRNEK 1: USER SORGUSU (Default Attributes)
+# ============================================
+- name: "Örnek 1 - User Sorgusu (Default)"
+  ansible.builtin.command:
+    cmd: >
+      python3 {{ role_path }}/files/ad_query.py
+      user
+      "{{ domain_info[domain].fqdn }}"
+      "{{ username }}"
+  environment:
+    AD_USER: "{{ domain_info[domain].domain_admin }}"
+    AD_PASSWORD: "{{ domain_info[domain].domain_password }}"
+    AD_QUERY_DEBUG: "false"
+  register: ad_user_query_raw
+  changed_when: false
+
+- name: "User Sorgu Sonucunu Parse Et"
+  ansible.builtin.set_fact:
+    ad_user_result: "{{ ad_user_query_raw.stdout_lines[-1] | from_json }}"
+
+- name: "User Sorgu Başarısız mı?"
+  ansible.builtin.fail:
+    msg: "AD user sorgusu başarısız: {{ ad_user_result.error }}"
+  when: not ad_user_result.success | bool
+
+- name: "User Bulunamadı Uyarısı"
+  ansible.builtin.debug:
+    msg: "UYARI: User '{{ username }}' AD'de bulunamadı"
+  when:
+    - ad_user_result.success | bool
+    - not ad_user_result.found | bool
+
+- name: "User Bilgilerini Kaydet"
+  ansible.builtin.set_fact:
+    ad_user_info: "{{ ad_user_result.attributes }}"
+  when:
+    - ad_user_result.success | bool
+    - ad_user_result.found | bool
+
+- name: "User Bilgilerini Göster"
+  ansible.builtin.debug:
+    msg:
+      - "DN: {{ ad_user_result.dn }}"
+      - "Common Name: {{ ad_user_info.cn }}"
+      - "Email: {{ ad_user_info.mail }}"
+      - "Display Name: {{ ad_user_info.displayname }}"
+      - "UPN: {{ ad_user_info.userprincipalname }}"
+      - "Groups: {{ ad_user_info.memberof | length }} adet"
+      - "Son Giriş: {{ ad_user_info.lastlogon }}"
+  when:
+    - ad_user_result.success | bool
+    - ad_user_result.found | bool
+
+# ============================================
+# ÖRNEK 2: COMPUTER SORGUSU (Default Attributes)
+# ============================================
+- name: "Örnek 2 - Computer Sorgusu (Default)"
+  ansible.builtin.command:
+    cmd: >
+      python3 {{ role_path }}/files/ad_query.py
+      computer
+      "{{ domain_info[domain].fqdn }}"
+      "{{ vm_name }}"
+  environment:
+    AD_USER: "{{ domain_info[domain].domain_admin }}"
+    AD_PASSWORD: "{{ domain_info[domain].domain_password }}"
+  register: ad_computer_query_raw
+  changed_when: false
+
+- name: "Computer Sorgu Sonucunu Parse Et"
+  ansible.builtin.set_fact:
+    ad_computer_result: "{{ ad_computer_query_raw.stdout_lines[-1] | from_json }}"
+
+- name: "Computer Bilgilerini Kaydet"
+  ansible.builtin.set_fact:
+    ad_computer_info: "{{ ad_computer_result.attributes }}"
+  when:
+    - ad_computer_result.success | bool
+    - ad_computer_result.found | bool
+
+- name: "Computer Bilgilerini Göster"
+  ansible.builtin.debug:
+    msg:
+      - "Computer Name: {{ ad_computer_info.cn }}"
+      - "FQDN: {{ ad_computer_info.dnshostname }}"
+      - "OS: {{ ad_computer_info.operatingsystem }}"
+      - "OS Version: {{ ad_computer_info.operatingsystemversion }}"
+      - "Description: {{ ad_computer_info.description }}"
+  when:
+    - ad_computer_result.success | bool
+    - ad_computer_result.found | bool
+
+# ============================================
+# ÖRNEK 3: CUSTOM ATTRIBUTES ile USER SORGUSU
+# ============================================
+- name: "Örnek 3 - Custom Attributes ile User Sorgusu"
+  ansible.builtin.command:
+    cmd: >
+      python3 {{ role_path }}/files/ad_query.py
+      user
+      "{{ domain_info[domain].fqdn }}"
+      "{{ username }}"
+      "cn,mail,department,manager,title,telephonenumber"
+  environment:
+    AD_USER: "{{ domain_info[domain].domain_admin }}"
+    AD_PASSWORD: "{{ domain_info[domain].domain_password }}"
+  register: ad_custom_query_raw
+  changed_when: false
+
+- name: "Custom Query Sonucunu Parse Et"
+  ansible.builtin.set_fact:
+    ad_custom_result: "{{ ad_custom_query_raw.stdout_lines[-1] | from_json }}"
+    ad_custom_info: "{{ (ad_custom_query_raw.stdout_lines[-1] | from_json).attributes }}"
+  when: (ad_custom_query_raw.stdout_lines[-1] | from_json).success | bool and (ad_custom_query_raw.stdout_lines[-1] | from_json).found | bool
+
+- name: "Custom Attributes Göster"
+  ansible.builtin.debug:
+    msg:
+      - "Name: {{ ad_custom_info.cn }}"
+      - "Email: {{ ad_custom_info.mail }}"
+      - "Department: {{ ad_custom_info.department }}"
+      - "Manager: {{ ad_custom_info.manager }}"
+      - "Title: {{ ad_custom_info.title }}"
+      - "Phone: {{ ad_custom_info.telephonenumber }}"
+  when:
+    - ad_custom_result.success | bool
+    - ad_custom_result.found | bool
+
+# ============================================
+# ÖRNEK 4: DEBUG MODE AKTİF
+# ============================================
+- name: "Örnek 4 - Debug Mode ile Sorgu"
+  ansible.builtin.command:
+    cmd: >
+      python3 {{ role_path }}/files/ad_query.py
+      user
+      "{{ domain_info[domain].fqdn }}"
+      "{{ username }}"
+  environment:
+    AD_USER: "{{ domain_info[domain].domain_admin }}"
+    AD_PASSWORD: "{{ domain_info[domain].domain_password }}"
+    AD_QUERY_DEBUG: "true"
+  register: ad_debug_query_raw
+  changed_when: false
+
+# Debug modda stderr'de detaylı loglar gelir
+- name: "Debug Logları Göster"
+  ansible.builtin.debug:
+    msg: "{{ ad_debug_query_raw.stderr_lines }}"
+
+# ============================================
+# ÖRNEK 5: HATA YÖNETİMİ
+# ============================================
+- name: "Örnek 5 - Hata Yönetimi"
+  block:
+    - name: "AD Sorgusu Yap"
+      ansible.builtin.command:
+        cmd: >
+          python3 {{ role_path }}/files/ad_query.py
+          user
+          "{{ domain_info[domain].fqdn }}"
+          "{{ username }}"
+      environment:
+        AD_USER: "{{ domain_info[domain].domain_admin }}"
+        AD_PASSWORD: "{{ domain_info[domain].domain_password }}"
+      register: ad_query_raw
+      changed_when: false
+      failed_when: false  # Hata durumunda task fail olmasın
+
+    - name: "Sorgu Sonucunu Parse Et"
+      ansible.builtin.set_fact:
+        ad_result: "{{ ad_query_raw.stdout_lines[-1] | from_json }}"
+
+    - name: "Hata Kontrolü"
+      ansible.builtin.debug:
+        msg: "HATA: {{ ad_result.error }} - {{ ad_result.details | default('') }}"
+      when: not ad_result.success | bool
+
+    - name: "Object Bulunamadı Kontrolü"
+      ansible.builtin.debug:
+        msg: "{{ ad_result.message }}"
+      when:
+        - ad_result.success | bool
+        - not ad_result.found | bool
+
+    - name: "Başarılı Sonuç"
+      ansible.builtin.debug:
+        msg: "✓ {{ ad_result.object_type | upper }} bulundu: {{ ad_result.search_term }}"
+      when:
+        - ad_result.success | bool
+        - ad_result.found | bool
+
+# ============================================
+# ÖRNEK 6: KOŞULLU İŞLEM (User varsa devam et)
+# ============================================
+- name: "Örnek 6 - Koşullu İşlem"
+  ansible.builtin.command:
+    cmd: >
+      python3 {{ role_path }}/files/ad_query.py
+      user
+      "{{ domain_info[domain].fqdn }}"
+      "{{ username }}"
+  environment:
+    AD_USER: "{{ domain_info[domain].domain_admin }}"
+    AD_PASSWORD: "{{ domain_info[domain].domain_password }}"
+  register: user_check_raw
+  changed_when: false
+
+- name: "User Check Parse"
+  ansible.builtin.set_fact:
+    user_check: "{{ user_check_raw.stdout_lines[-1] | from_json }}"
+
+- name: "User Var - İşleme Devam Et"
+  ansible.builtin.debug:
+    msg: "User mevcut, VM oluşturma devam edebilir"
+  when:
+    - user_check.success | bool
+    - user_check.found | bool
+
+- name: "User Yok - VM Oluşturma İptal"
+  ansible.builtin.fail:
+    msg: "User '{{ username }}' AD'de bulunamadı, VM oluşturulamaz"
+  when:
+    - user_check.success | bool
+    - not user_check.found | bool
+
+# ============================================
+# ÖRNEK 7: GRUP ÜYELİĞİ KONTROLÜ
+# ============================================
+- name: "Örnek 7 - Grup Üyeliği Kontrolü"
+  ansible.builtin.command:
+    cmd: >
+      python3 {{ role_path }}/files/ad_query.py
+      user
+      "{{ domain_info[domain].fqdn }}"
+      "{{ username }}"
+  environment:
+    AD_USER: "{{ domain_info[domain].domain_admin }}"
+    AD_PASSWORD: "{{ domain_info[domain].domain_password }}"
+  register: user_group_raw
+  changed_when: false
+
+- name: "User Bilgilerini Al"
+  ansible.builtin.set_fact:
+    user_groups: "{{ (user_group_raw.stdout_lines[-1] | from_json).attributes }}"
+  when: (user_group_raw.stdout_lines[-1] | from_json).success | bool
+
+- name: "Belirli Grup Üyeliğini Kontrol Et"
+  ansible.builtin.set_fact:
+    is_admin: "{{ 'CN=Domain Admins' in (user_groups.memberof | join(',')) }}"
+  when:
+    - user_groups is defined
+    - user_groups.memberof != "N/A"
+
+- name: "Admin Yetkisi Var mı?"
+  ansible.builtin.debug:
+    msg: "{{ 'User admin yetkisine sahip' if is_admin | default(false) else 'User standart kullanıcı' }}"
