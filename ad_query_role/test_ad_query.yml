@@ -1,0 +1,145 @@
+---
+# test_ad_query.yml
+# AD Query Role Test Playbook
+
+- name: "AD Query Role - Test Playbook"
+  hosts: localhost
+  gather_facts: false
+  
+  vars:
+    # Credentials (vault'tan gelecek)
+    ad_user: "administrator@test.local.net"
+    ad_password: "P@ssw0rd"
+    
+    # Test domain
+    test_domain: "test.local.net"
+  
+  tasks:
+    - name: "=" * 60
+      ansible.builtin.debug:
+        msg: "TEST 1: USER SORGUSU"
+    
+    - name: "User Sorgula (Default Attributes)"
+      ansible.builtin.include_role:
+        name: ad_query
+      vars:
+        ad_object_type: "user"
+        ad_domain: "{{ test_domain }}"
+        ad_search_term: "jdoe"
+        ad_query_debug: true
+    
+    - name: "User Bulundu mu?"
+      ansible.builtin.debug:
+        msg: "{{ 'User bulundu: ' + ad_query_result.dn if ad_query_result.found else 'User bulunamadı' }}"
+    
+    - name: "User Bilgilerini Göster"
+      ansible.builtin.debug:
+        msg:
+          - "CN: {{ ad_object_info.cn }}"
+          - "Email: {{ ad_object_info.mail }}"
+          - "Display Name: {{ ad_object_info.displayname }}"
+          - "UPN: {{ ad_object_info.userprincipalname }}"
+          - "Son Giriş: {{ ad_object_info.lastlogon }}"
+          - "Grup Sayısı: {{ ad_object_info.memberof | length if ad_object_info.memberof != 'N/A' else 0 }}"
+      when: ad_query_result.found | bool
+    
+    - name: "=" * 60
+      ansible.builtin.debug:
+        msg: "TEST 2: COMPUTER SORGUSU"
+    
+    - name: "Computer Sorgula"
+      ansible.builtin.include_role:
+        name: ad_query
+      vars:
+        ad_object_type: "computer"
+        ad_domain: "{{ test_domain }}"
+        ad_search_term: "PC001"
+    
+    - name: "Computer Bilgilerini Göster"
+      ansible.builtin.debug:
+        msg:
+          - "Computer: {{ ad_object_info.cn }}"
+          - "FQDN: {{ ad_object_info.dnshostname }}"
+          - "OS: {{ ad_object_info.operatingsystem }}"
+          - "OS Version: {{ ad_object_info.operatingsystemversion }}"
+          - "Description: {{ ad_object_info.description }}"
+      when: ad_query_result.found | bool
+    
+    - name: "=" * 60
+      ansible.builtin.debug:
+        msg: "TEST 3: GROUP SORGUSU"
+    
+    - name: "Group Sorgula"
+      ansible.builtin.include_role:
+        name: ad_query
+      vars:
+        ad_object_type: "group"
+        ad_domain: "{{ test_domain }}"
+        ad_search_term: "IT-Team"
+    
+    - name: "Group Bilgilerini Göster"
+      ansible.builtin.debug:
+        msg:
+          - "Group: {{ ad_object_info.cn }}"
+          - "Description: {{ ad_object_info.description }}"
+          - "Group Type: {{ ad_object_info.grouptype }}"
+          - "Toplam Üye: {{ ad_object_info.member.count if ad_object_info.member is mapping else 'N/A' }}"
+          - "Sample Üye Sayısı: {{ ad_object_info.member.sample | length if ad_object_info.member is mapping else 0 }}"
+      when: ad_query_result.found | bool
+    
+    - name: "Group Üyelerini Göster (Sample)"
+      ansible.builtin.debug:
+        msg: "{{ ad_object_info.member.sample }}"
+      when:
+        - ad_query_result.found | bool
+        - ad_object_info.member is mapping
+        - ad_object_info.member.count > 0
+    
+    - name: "=" * 60
+      ansible.builtin.debug:
+        msg: "TEST 4: CUSTOM ATTRIBUTES"
+    
+    - name: "User Sorgula (Custom Attributes)"
+      ansible.builtin.include_role:
+        name: ad_query
+      vars:
+        ad_object_type: "user"
+        ad_domain: "{{ test_domain }}"
+        ad_search_term: "jdoe"
+        ad_custom_attributes: "cn,mail,department,manager,title,telephonenumber"
+    
+    - name: "Custom Attributes Göster"
+      ansible.builtin.debug:
+        msg:
+          - "CN: {{ ad_object_info.cn }}"
+          - "Email: {{ ad_object_info.mail }}"
+          - "Department: {{ ad_object_info.department }}"
+          - "Manager: {{ ad_object_info.manager }}"
+          - "Title: {{ ad_object_info.title }}"
+          - "Phone: {{ ad_object_info.telephonenumber }}"
+      when: ad_query_result.found | bool
+    
+    - name: "=" * 60
+      ansible.builtin.debug:
+        msg: "TEST 5: OBJECT BULUNAMADI"
+    
+    - name: "Olmayan User Sorgula"
+      ansible.builtin.include_role:
+        name: ad_query
+      vars:
+        ad_object_type: "user"
+        ad_domain: "{{ test_domain }}"
+        ad_search_term: "nonexistentuser999"
+    
+    - name: "Bulunamadı Mesajı"
+      ansible.builtin.debug:
+        msg: "{{ ad_query_result.message }}"
+      when: not ad_query_result.found | bool
+    
+    - name: "Denenen DC'leri Göster"
+      ansible.builtin.debug:
+        msg: "{{ ad_query_result.tried_servers }}"
+    
+    - name: "=" * 60
+      ansible.builtin.debug:
+        msg: "TÜM TESTLER TAMAMLANDI"

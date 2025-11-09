@@ -1,0 +1,125 @@
+---
+# roles/ad_query/tasks/main.yml
+# AD Query Role - Ana Task
+
+# ============================================
+# PARAMETRE DOĞRULAMA
+# ============================================
+- name: "Parametreleri Doğrula"
+  ansible.builtin.assert:
+    that:
+      - ad_object_type in ['user', 'computer', 'group']
+      - ad_domain | length > 0
+      - ad_search_term | length > 0
+      - ad_user | length > 0
+      - ad_password | length > 0
+    fail_msg: "Gerekli parametreler eksik veya hatalı. ad_object_type, ad_domain, ad_search_term, ad_user, ad_password zorunludur."
+    quiet: true
+
+# ============================================
+# PYTHON MODÜL KONTROLÜ
+# ============================================
+- name: "Python Modül Kontrolü - ldap3"
+  ansible.builtin.command:
+    cmd: python3 -c "import ldap3; print('OK')"
+  register: ldap3_check
+  changed_when: false
+  failed_when: false
+
+- name: "Python Modül Kontrolü - dnspython"
+  ansible.builtin.command:
+    cmd: python3 -c "import dns.resolver; print('OK')"
+  register: dnspython_check
+  changed_when: false
+  failed_when: false
+
+- name: "Eksik Modül Listesi"
+  ansible.builtin.set_fact:
+    missing_modules: >-
+      {{
+        (ldap3_check.rc != 0) | ternary(['ldap3'], []) +
+        (dnspython_check.rc != 0) | ternary(['dnspython'], [])
+      }}
+
+- name: "Modül Eksikliği Uyarısı"
+  ansible.builtin.fail:
+    msg: |
+      Gerekli Python modülleri eksik: {{ missing_modules | join(', ') }}
+      
+      Yükleme komutları:
+      {% for module in missing_modules %}
+      pip3 install {{ module }} --break-system-packages
+      {% endfor %}
+      
+      Veya execution environment'a ekleyin.
+  when: missing_modules | length > 0
+
+- name: "✓ Python Modülleri Yüklü"
+  ansible.builtin.debug:
+    msg: "Tüm gerekli Python modülleri mevcut (ldap3, dnspython)"
+
+# ============================================
+# AD QUERY BAŞLAT
+# ============================================
+- name: "AD Query Başlatılıyor"
+  ansible.builtin.debug:
+    msg: "{{ ad_object_type | upper }} sorgusu: {{ ad_search_term }} @ {{ ad_domain }}"
+
+- name: "Python Script Çalıştır"
+  ansible.builtin.command:
+    cmd: >
+      python3 {{ role_path }}/files/ad_query.py
+      {{ ad_object_type }}
+      {{ ad_domain }}
+      {{ ad_search_term }}
+      {{ ad_custom_attributes }}
+  environment:
+    AD_USER: "{{ ad_user }}"
+    AD_PASSWORD: "{{ ad_password }}"
+    AD_CERT_PATH: "{{ ad_cert_path }}"
+    LDAP_TIMEOUT: "{{ ldap_timeout }}"
+    AD_QUERY_MAX_RETRIES: "{{ ad_query_max_retries }}"
+    AD_QUERY_RETRY_DELAY: "{{ ad_query_retry_delay }}"
+    MEMBER_SAMPLE_SIZE: "{{ member_sample_size }}"
+    AD_QUERY_DEBUG: "{{ ad_query_debug | lower }}"
+  register: ad_query_raw
+  changed_when: false
+  failed_when: false
+
+# ============================================
+# SONUÇ İŞLEME
+# ============================================
+- name: "JSON Parse Et"
+  ansible.builtin.set_fact:
+    ad_query_result: "{{ ad_query_raw.stdout_lines[-1] | from_json }}"
+
+- name: "Sorgu Başarısız mı Kontrol Et"
+  ansible.builtin.fail:
+    msg: "AD sorgusu başarısız: {{ ad_query_result.error }} - {{ ad_query_result.details | default('') }}"
+  when: not ad_query_result.success | bool
+
+- name: "Object Bulunamadı Uyarısı"
+  ansible.builtin.debug:
+    msg: "UYARI: {{ ad_query_result.message }}"
+  when:
+    - ad_query_result.success | bool
+    - not ad_query_result.found | bool
+
+- name: "AD Object Bilgilerini Kaydet (Dinamik)"
+  ansible.builtin.set_fact:
+    ad_object_info: "{{ ad_query_result.attributes }}"
+  when:
+    - ad_query_result.success | bool
+    - ad_query_result.found | bool
+
+- name: "Sonuç Özeti"
+  ansible.builtin.debug:
+    msg:
+      - "✓ Object Type: {{ ad_query_result.object_type | default('N/A') }}"
+      - "✓ Domain: {{ ad_query_result.domain | default('N/A') }}"
+      - "✓ Server: {{ ad_query_result.server | default('N/A') }}"
+      - "✓ Found: {{ ad_query_result.found | default(false) }}"
+      - "✓ DN: {{ ad_query_result.dn | default('N/A') }}"
+      - "✓ Denenen DC'ler: {{ ad_query_result.tried_servers | default([]) | length }}"
+      - "✓ Credential Test DC: {{ ad_query_result.credential_test_dc | default('N/A') }}"
+  when: ad_query_result.success | bool

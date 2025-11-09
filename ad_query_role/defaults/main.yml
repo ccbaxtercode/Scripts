@@ -1,0 +1,42 @@
+---
+# roles/ad_query/defaults/main.yml
+# AD Query Role - Default Variables
+
+# ============================================
+# ZORUNLU PARAMETRELER (Mutlaka girilmeli)
+# ============================================
+ad_object_type: ""           # user, computer, group
+ad_domain: ""                # test.local.net
+ad_search_term: ""           # jdoe, PC001, IT-Team
+
+# ============================================
+# OPSİYONEL PARAMETRELER
+# ============================================
+ad_custom_attributes: ""     # "cn,mail,department" (boş = default attributes)
+
+# Sertifika ayarları
+ad_cert_path: "/etc/ssl/certs/ad_chain.crt"
+
+# Timeout ve retry ayarları
+ldap_timeout: 10                    # Saniye
+ad_query_max_retries: 3            # Her DC için retry sayısı
+ad_query_retry_delay: 5            # Retry arası bekleme (saniye)
+
+# Group member sample size
+member_sample_size: 10             # Group member sample boyutu
+
+# Debug mode
+ad_query_debug: false
+
+# ============================================
+# CREDENTİALS (Vault'tan gelecek)
+# ============================================
+ad_user: ""                        # {{ vault_ad_user }}
+ad_password: ""                    # {{ vault_ad_password }}
+
+# ============================================
+# PYTHON MODÜL GEREKSİNİMLERİ
+# ============================================
+ad_query_required_modules:
+  - ldap3
+  - dnspython
