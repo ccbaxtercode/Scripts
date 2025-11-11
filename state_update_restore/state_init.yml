@@ -1,0 +1,52 @@
+# Dosya: state_init.yml
+# Açıklama: State dosyasını oku veya oluştur
+
+---
+- name: "[STATE] State Dosya Yolu Belirle"
+  ansible.builtin.set_fact:
+    vm_state_file: "/tmp/vm_provision_state_{{ service_desk_no }}.json"
+
+- name: "[STATE] State Dosyası Var mı Kontrol Et"
+  ansible.builtin.stat:
+    path: "{{ vm_state_file }}"
+  register: state_file_stat
+
+- name: "[STATE] Mevcut State Dosyasını Oku"
+  ansible.builtin.slurp:
+    src: "{{ vm_state_file }}"
+  register: state_file_content
+  when: state_file_stat.stat.exists
+
+- name: "[STATE] State Parse Et"
+  ansible.builtin.set_fact:
+    vm_state: "{{ state_file_content.content | b64decode | from_json }}"
+  when: state_file_stat.stat.exists
+
+- name: "[STATE] Yeni State Oluştur"
+  ansible.builtin.set_fact:
+    vm_state:
+      service_desk_no: "{{ service_desk_no }}"
+      vm_name: "{{ vm_name }}"
+      username: "{{ username }}"
+      completed_steps: []
+      data: {}
+      created_at: "{{ ansible_date_time.iso8601 }}"
+      last_updated: "{{ ansible_date_time.iso8601 }}"
+  when: not state_file_stat.stat.exists
+
+- name: "[STATE] İlk State Dosyasını Yaz"
+  ansible.builtin.copy:
+    content: "{{ vm_state | to_nice_json }}"
+    dest: "{{ vm_state_file }}"
+  when: not state_file_stat.stat.exists
+
+- name: "[STATE] Değişkenleri Geri Yükle"
+  ansible.builtin.include_tasks: state_restore_vars.yml
+  when: state_file_stat.stat.exists
+
+- name: "[STATE] Durum Bilgisi"
+  ansible.builtin.debug:
+    msg:
+      - "State File: {{ vm_state_file }}"
+      - "Tamamlanan Adımlar: {{ vm_state.completed_steps | join(', ') if vm_state.completed_steps else 'Yok' }}"
+      - "{{ 'DEVAM EDİYOR (Kaldığı Yerden)' if state_file_stat.stat.exists else 'YENİ BAŞLATILIYOR' }}"

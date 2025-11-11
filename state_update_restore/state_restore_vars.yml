@@ -1,0 +1,21 @@
+# Dosya: state_restore_vars.yml
+# Açıklama: State'ten tüm değişkenleri geri yükle
+
+---
+- name: "[STATE] Değişkenler Geri Yükleniyor"
+  ansible.builtin.debug:
+    msg: "Kaydedilmiş {{ vm_state.vars.keys() | list | length }} adım bulundu"
+  when: vm_state.vars is defined
+
+- name: "[STATE] Tüm Değişkenleri Geri Yükle"
+  ansible.builtin.set_fact:
+    "{{ item.key }}": "{{ item.value }}"
+  loop: "{{ vm_state.vars | dict2items | map(attribute='value') | map('dict2items') | flatten }}"
+  loop_control:
+    label: "{{ item.key }}"
+  when: vm_state.vars is defined
+
+- name: "[STATE] Geri Yüklenen Değişkenler"
+  ansible.builtin.debug:
+    msg: "✓ {{ vm_state.vars.keys() | list | length }} adımdan değişkenler yüklendi"
+  when: vm_state.vars is defined

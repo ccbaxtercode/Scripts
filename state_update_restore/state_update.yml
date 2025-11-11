@@ -1,0 +1,20 @@
+# Dosya: state_update.yml
+# Açıklama: State dosyasını güncelle
+
+---
+- name: "[STATE] Adım Tamamlandı - {{ step_name }}"
+  ansible.builtin.set_fact:
+    vm_state: "{{ vm_state | combine({
+        'completed_steps': vm_state.completed_steps + [step_name],
+        'data': vm_state.data | combine(step_data | default({})),
+        'last_updated': ansible_date_time.iso8601
+      }, recursive=True) }}"
+
+- name: "[STATE] State Dosyasını Güncelle"
+  ansible.builtin.copy:
+    content: "{{ vm_state | to_nice_json }}"
+    dest: "{{ vm_state_file }}"
+
+- name: "[STATE] Adım Kaydedildi"
+  ansible.builtin.debug:
+    msg: "✓ {{ step_name }} tamamlandı ve kaydedildi"

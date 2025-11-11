@@ -1,0 +1,54 @@
+# State JSON Yapısı Örneği
+# Dosya: /tmp/vm_provision_state_12345.json
+
+{
+  "service_desk_no": "12345",
+  "vm_name": "personal",
+  "username": "mehmet",
+  "created_at": "2025-11-09T18:30:00Z",
+  "last_updated": "2025-11-09T18:45:00Z",
+  
+  "completed_steps": [
+    "vm_name_check",
+    "vm_create",
+    "domain_join"
+  ],
+  
+  "vars": {
+    "vm_name_check": {
+      "vm_name": "personal",
+      "username": "mehmet",
+      "personal_vm_prefix": "VDI-MEHMET",
+      "temp_os_family": "windows",
+      "vcenter_list": "vcenter1.local,vcenter2.local"
+    },
+    "vm_create": {
+      "final_vm_name": "VDI-MEHMET01",
+      "selected_vcenter": "vcenter1",
+      "vm_template": "Template-Windows10",
+      "vm_cpu": 2,
+      "vm_memory": 4096
+    },
+    "domain_join": {
+      "vm_ip": "192.168.1.100",
+      "domain_fqdn": "domain1.local",
+      "domain_admin": "administrator@domain1.local",
+      "target_ou": "OU=Workstations,DC=domain1,DC=local"
+    }
+  },
+  
+  "data": {
+    "vm_name_check": {
+      "found_vm_name": "VDI-MEHMET01",
+      "found_index": 1
+    },
+    "vm_create": {
+      "vm_ip": "192.168.1.100",
+      "vm_uuid": "abc-123-def"
+    },
+    "domain_join": {
+      "domain_joined": true,
+      "joined_at": "2025-11-09T18:40:00Z"
+    }
+  }
+}

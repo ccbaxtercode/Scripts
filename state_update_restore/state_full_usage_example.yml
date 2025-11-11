@@ -1,0 +1,235 @@
+# Dosya: state_full_usage_example.yml
+# Açıklama: State Management - Tam Kullanım Örneği (Değişken Kaydetme Dahil)
+
+---
+- name: "VM Provisioning with Full State Management"
+  hosts: localhost
+  gather_facts: true
+  
+  vars:
+    service_desk_no: "12345"
+    vm_name: "personal"
+    username: "mehmet"
+    yerleske: "a"
+    domain: "domain1"
+    os: "windows10"
+    vm_spec: "standart"
+  
+  tasks:
+    # ============================================
+    # BAŞLANGIÇ - State Init
+    # ============================================
+    - name: "State Yönetimini Başlat"
+      ansible.builtin.include_tasks: state_init.yml
+    
+    # ============================================
+    # ADIM 1: VM Name Check
+    # ============================================
+    - name: "ADIM 1: VM Name Check"
+      when: "'vm_name_check' not in vm_state.completed_steps"
+      block:
+        # Değişkenleri hazırla
+        - name: "VM Name Check Parametreleri Hazırla"
+          ansible.builtin.set_fact:
+            personal_vm_prefix: "VDI-MEHMET"
+            temp_os_family: "windows"
+            vcenter_list: "vcenter1.local,vcenter2.local"
+        
+        # Adım başı - Değişkenleri kaydet
+        - name: "State'e Değişkenleri Kaydet"
+          ansible.builtin.include_tasks: state_save_vars.yml
+          vars:
+            step_name: "vm_name_check"
+            save_vars:
+              vm_name: "{{ vm_name }}"
+              username: "{{ username }}"
+              personal_vm_prefix: "{{ personal_vm_prefix }}"
+              temp_os_family: "{{ temp_os_family }}"
+              vcenter_list: "{{ vcenter_list }}"
+        
+        # İşlemler...
+        - name: "VM İsim Kontrolü Yapılıyor"
+          ansible.builtin.set_fact:
+            found_vm_name: "VDI-MEHMET01"
+            found_index: 1
+        
+        # Adım sonu - Sonuçları kaydet
+        - name: "State Güncelle - VM Name Check"
+          ansible.builtin.include_tasks: state_update.yml
+          vars:
+            step_name: "vm_name_check"
+            step_data:
+              found_vm_name: "{{ found_vm_name }}"
+              found_index: "{{ found_index }}"
+    
+    # ============================================
+    # ADIM 2: VM Create
+    # ============================================
+    - name: "ADIM 2: VM Create"
+      when: "'vm_create' not in vm_state.completed_steps"
+      block:
+        # Değişkenleri hazırla
+        - name: "VM Create Parametreleri Hazırla"
+          ansible.builtin.set_fact:
+            final_vm_name: "{{ found_vm_name | default(vm_state.data.vm_name_check.found_vm_name) }}"
+            selected_vcenter: "vcenter1"
+            vm_template: "Template-Windows10"
+            vm_cpu: 2
+            vm_memory: 4096
+        
+        # Adım başı - Değişkenleri kaydet
+        - name: "State'e Değişkenleri Kaydet"
+          ansible.builtin.include_tasks: state_save_vars.yml
+          vars:
+            step_name: "vm_create"
+            save_vars:
+              final_vm_name: "{{ final_vm_name }}"
+              selected_vcenter: "{{ selected_vcenter }}"
+              vm_template: "{{ vm_template }}"
+              vm_cpu: "{{ vm_cpu }}"
+              vm_memory: "{{ vm_memory }}"
+        
+        # İşlemler...
+        - name: "VM Oluşturuluyor"
+          ansible.builtin.set_fact:
+            vm_creation_result:
+              ip_address: "192.168.1.100"
+              uuid: "abc-123-def"
+        
+        # Adım sonu - Sonuçları kaydet
+        - name: "State Güncelle - VM Create"
+          ansible.builtin.include_tasks: state_update.yml
+          vars:
+            step_name: "vm_create"
+            step_data:
+              vm_ip: "{{ vm_creation_result.ip_address }}"
+              vm_uuid: "{{ vm_creation_result.uuid }}"
+    
+    # ============================================
+    # ADIM 3: Domain Join
+    # ============================================
+    - name: "ADIM 3: Domain Join"
+      when: "'domain_join' not in vm_state.completed_steps"
+      block:
+        # Değişkenleri hazırla
+        - name: "Domain Join Parametreleri Hazırla"
+          ansible.builtin.set_fact:
+            vm_ip: "{{ vm_creation_result.ip_address | default(vm_state.data.vm_create.vm_ip) }}"
+            domain_fqdn: "domain1.local"
+            domain_admin: "administrator@domain1.local"
+            target_ou: "OU=Workstations,DC=domain1,DC=local"
+        
+        # Adım başı - Değişkenleri kaydet
+        - name: "State'e Değişkenleri Kaydet"
+          ansible.builtin.include_tasks: state_save_vars.yml
+          vars:
+            step_name: "domain_join"
+            save_vars:
+              vm_ip: "{{ vm_ip }}"
+              domain_fqdn: "{{ domain_fqdn }}"
+              domain_admin: "{{ domain_admin }}"
+              target_ou: "{{ target_ou }}"
+        
+        # İşlemler...
+        - name: "Domain Join Yapılıyor"
+          ansible.builtin.debug:
+            msg: "Domain join: {{ vm_ip }}"
+        
+        # Adım sonu - Sonuçları kaydet
+        - name: "State Güncelle - Domain Join"
+          ansible.builtin.include_tasks: state_update.yml
+          vars:
+            step_name: "domain_join"
+            step_data:
+              domain_joined: true
+              joined_at: "{{ ansible_date_time.iso8601 }}"
+    
+    # ============================================
+    # ADIM 4: AD Verification
+    # ============================================
+    - name: "ADIM 4: AD Verification"
+      when: "'ad_verify' not in vm_state.completed_steps"
+      block:
+        # 10 saniye bekle
+        - name: "AD Replication Bekle"
+          ansible.builtin.pause:
+            seconds: 10
+        
+        # Değişkenleri hazırla
+        - name: "AD Verify Parametreleri Hazırla"
+          ansible.builtin.set_fact:
+            ad_object_name: "{{ final_vm_name | default(vm_state.data.vm_name_check.found_vm_name) }}"
+            ad_domain: "{{ domain_fqdn | default(vm_state.vars.domain_join.domain_fqdn) }}"
+        
+        # Adım başı - Değişkenleri kaydet
+        - name: "State'e Değişkenleri Kaydet"
+          ansible.builtin.include_tasks: state_save_vars.yml
+          vars:
+            step_name: "ad_verify"
+            save_vars:
+              ad_object_name: "{{ ad_object_name }}"
+              ad_domain: "{{ ad_domain }}"
+        
+        # İşlemler...
+        - name: "AD Doğrulama"
+          ansible.builtin.set_fact:
+            ad_query_result:
+              found: true
+              dn: "CN=VDI-MEHMET01,OU=Workstations,DC=domain1,DC=local"
+        
+        # Adım sonu - Sonuçları kaydet
+        - name: "State Güncelle - AD Verify"
+          ansible.builtin.include_tasks: state_update.yml
+          vars:
+            step_name: "ad_verify"
+            step_data:
+              ad_verified: true
+              ad_dn: "{{ ad_query_result.dn }}"
+    
+    # ============================================
+    # ADIM 5: Post Config
+    # ============================================
+    - name: "ADIM 5: Post Config"
+      when: "'post_config' not in vm_state.completed_steps"
+      block:
+        # Değişkenleri hazırla
+        - name: "Post Config Parametreleri Hazırla"
+          ansible.builtin.set_fact:
+            target_vm_ip: "{{ vm_ip | default(vm_state.vars.domain_join.vm_ip) }}"
+            target_username: "{{ username }}"
+        
+        # Adım başı - Değişkenleri kaydet
+        - name: "State'e Değişkenleri Kaydet"
+          ansible.builtin.include_tasks: state_save_vars.yml
+          vars:
+            step_name: "post_config"
+            save_vars:
+              target_vm_ip: "{{ target_vm_ip }}"
+              target_username: "{{ target_username }}"
+        
+        # İşlemler...
+        - name: "RDU Group + Reboot"
+          ansible.builtin.debug:
+            msg: "Post-configuration: {{ target_username }} @ {{ target_vm_ip }}"
+        
+        # Adım sonu - Sonuçları kaydet
+        - name: "State Güncelle - Post Config"
+          ansible.builtin.include_tasks: state_update.yml
+          vars:
+            step_name: "post_config"
+            step_data:
+              rdu_added: true
+              rebooted: true
+              completed_at: "{{ ansible_date_time.iso8601 }}"
+    
+    # ============================================
+    # TAMAMLANDI
+    # ============================================
+    - name: "Provisioning Tamamlandı"
+      ansible.builtin.debug:
+        msg:
+          - "✓ Tüm adımlar tamamlandı"
+          - "Service Desk: {{ service_desk_no }}"
+          - "VM: {{ final_vm_name | default(vm_state.data.vm_name_check.found_vm_name) }}"
+          - "IP: {{ vm_state.data.vm_create.vm_ip }}"
+          - "AD DN: {{ vm_state.data.ad_verify.ad_dn }}"
