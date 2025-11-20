@@ -1,0 +1,177 @@
+---
+# =============================================================================
+# SNAPSHOT OTOMASYON - ANA PLAYBOOK
+# =============================================================================
+# Bu playbook snapshot alma işlemini yönetir
+# 
+# Survey Parametreleri:
+#   - username: Kullanıcı adı
+#   - snapshot_retention_days: Snapshot tutulma süresi (1-15 gün)
+#   - service_desk_no: Servis desk numarası (unique, schedule adı olarak kullanılır)
+#   - domain: Domain bilgisi (domain1 veya domain2)
+#   - server_names: Sunucu isimleri (virgülle ayrılmış, max 10 adet)
+#
+# İş Akışı:
+#   1. Parametreleri al ve doğrula (sunucu sayısı, gün sayısı)
+#   2. snapshot_create.yaml çağır
+#   3. Rapor oluştur
+# =============================================================================
+
+- name: Snapshot Otomasyon - Snapshot Alma
+  hosts: localhost
+  gather_facts: false
+  
+  vars_files:
+    - vars/vcenter_mapping.yaml
+  
+  vars:
+    # Rapor değişkenleri
+    report_data:
+      start_time: "{{ ansible_date_time.iso8601 }}"
+      username: "{{ username }}"
+      service_desk_no: "{{ service_desk_no }}"
+      domain: "{{ domain }}"
+      retention_days: "{{ snapshot_retention_days }}"
+      servers_requested: []
+      servers_found: []
+      servers_not_found: []
+      servers_with_errors: []
+      servers_snapshot_success: []
+      servers_snapshot_failed: []
+      errors: []
+  
+  tasks:
+    # =========================================================================
+    # BLOCK: Parametreleri Doğrula
+    # =========================================================================
+    - name: BLOCK - Parametreleri Doğrula
+      block:
+        - name: Survey parametrelerini logla
+          debug:
+            msg:
+              - "Kullanıcı: {{ username }}"
+              - "Servis Desk No: {{ service_desk_no }}"
+              - "Domain: {{ domain }}"
+              - "Sunucu İsimleri: {{ server_names }}"
+              - "Snapshot Tutma Süresi: {{ snapshot_retention_days }} gün"
+        
+        - name: Sunucu isimlerini listeye çevir ve boşlukları temizle
+          set_fact:
+            server_list: "{{ server_names.split(',') | map('trim') | list }}"
+        
+        - name: Sunucu sayısını kontrol et (max 10)
+          assert:
+            that:
+              - server_list | length <= 10
+              - server_list | length > 0
+            fail_msg: "Sunucu sayısı 1 ile 10 arasında olmalıdır. Girilen: {{ server_list | length }}"
+            success_msg: "Sunucu sayısı kontrolü başarılı: {{ server_list | length }} sunucu"
+        
+        - name: Snapshot tutma süresini kontrol et (1-15 gün)
+          assert:
+            that:
+              - snapshot_retention_days | int >= 1
+              - snapshot_retention_days | int <= 15
+            fail_msg: "Snapshot tutma süresi 1 ile 15 gün arasında olmalıdır"
+            success_msg: "Snapshot tutma süresi kontrolü başarılı: {{ snapshot_retention_days }} gün"
+        
+        - name: Domain değerini kontrol et
+          assert:
+            that:
+              - domain in ['domain1', 'domain2']
+            fail_msg: "Domain değeri 'domain1' veya 'domain2' olmalıdır"
+            success_msg: "Domain kontrolü başarılı: {{ domain }}"
+        
+        - name: Rapor için istenen sunucu listesini kaydet
+          set_fact:
+            report_data: "{{ report_data | combine({'servers_requested': server_list}) }}"
+        
+        - name: Domain'e göre arama yapılacak vCenter'ları filtrele
+          set_fact:
+            search_targets: "{{ vcenter_list | json_query(query) }}"
+          vars:
+            query: "[].{name: name, hostname: hostname, datacenters: datacenters[?domain=='{{ domain }}']} | [?datacenters != `[]`]"
+        
+        - name: Arama hedeflerini göster
+          debug:
+            msg: 
+              - "Domain: {{ domain }}"
+              - "Arama hedefleri: {{ search_targets | length }} vCenter"
+              - "Toplam datacenter: {{ search_targets | sum(attribute='datacenters', start=[]) | length }}"
+      
+      rescue:
+        - name: Parametre doğrulama hatası
+          set_fact:
+            report_data: "{{ report_data | combine({'errors': report_data.errors + ['Parametre doğrulama hatası: ' + ansible_failed_result.msg]}) }}"
+        
+        - name: Hata mesajını göster
+          debug:
+            msg: "HATA: {{ ansible_failed_result.msg }}"
+        
+        - name: Playbook'u durdur
+          fail:
+            msg: "Parametre doğrulama başarısız. İşlem durduruluyor."
+    
+    # =========================================================================
+    # BLOCK: Snapshot Alma İşlemi
+    # =========================================================================
+    - name: BLOCK - Snapshot Alma İşlemini Çağır
+      block:
+        - name: Snapshot alma işlemini başlat
+          include_tasks: snapshot_create.yaml
+      
+      rescue:
+        - name: Snapshot işlem hatası
+          set_fact:
+            report_data: "{{ report_data | combine({'errors': report_data.errors + ['Snapshot işlem hatası: ' + (ansible_failed_result.msg | default('Bilinmeyen hata'))]}) }}"
+        
+        - name: Hata mesajını göster
+          debug:
+            msg: "HATA: Snapshot işlemi sırasında hata oluştu"
+    
+    # =========================================================================
+    # RAPOR OLUŞTURMA
+    # =========================================================================
+    - name: Rapor bitiş zamanını ekle
+      set_fact:
+        report_data: "{{ report_data | combine({'end_time': ansible_date_time.iso8601}) }}"
+    
+    - name: "=== SNAPSHOT İŞLEM RAPORU ==="
+      debug:
+        msg:
+          - "=========================================="
+          - "    SNAPSHOT İŞLEM RAPORU"
+          - "=========================================="
+          - ""
+          - "İşlem Bilgileri:"
+          - "  - Başlangıç: {{ report_data.start_time }}"
+          - "  - Bitiş: {{ report_data.end_time }}"
+          - "  - Kullanıcı: {{ report_data.username }}"
+          - "  - Servis Desk No: {{ report_data.service_desk_no }}"
+          - "  - Domain: {{ report_data.domain }}"
+          - "  - Snapshot Tutma Süresi: {{ report_data.retention_days }} gün"
+          - ""
+          - "Sunucu İstatistikleri:"
+          - "  - İstenen Sunucu Sayısı: {{ report_data.servers_requested | length }}"
+          - "  - Bulunan Sunucu Sayısı: {{ report_data.servers_found | length }}"
+          - "  - Bulunamayan Sunucu Sayısı: {{ report_data.servers_not_found | length }}"
+          - "  - Hatalı/Belirsiz Sunucu Sayısı: {{ report_data.servers_with_errors | length }}"
+          - "  - Başarılı Snapshot Sayısı: {{ report_data.servers_snapshot_success | length }}"
+          - "  - Başarısız Snapshot Sayısı: {{ report_data.servers_snapshot_failed | length }}"
+          - ""
+          - "Detaylar:"
+          - "  İstenen: {{ report_data.servers_requested | join(', ') }}"
+          - "  Bulunan: {{ report_data.servers_found | join(', ') if report_data.servers_found | length > 0 else 'YOK' }}"
+          - "  Bulunamayan: {{ report_data.servers_not_found | join(', ') if report_data.servers_not_found | length > 0 else 'YOK' }}"
+          - "  Hatalı/Belirsiz: {{ report_data.servers_with_errors | join(', ') if report_data.servers_with_errors | length > 0 else 'YOK' }}"
+          - "  Başarılı Snapshot: {{ report_data.servers_snapshot_success | join(', ') if report_data.servers_snapshot_success | length > 0 else 'YOK' }}"
+          - "  Başarısız Snapshot: {{ report_data.servers_snapshot_failed | join(', ') if report_data.servers_snapshot_failed | length > 0 else 'YOK' }}"
+          - ""
+          - "Hatalar:"
+          - "{{ report_data.errors | join('\n  ') if report_data.errors | length > 0 else '  Hata yok' }}"
+          - ""
+          - "=========================================="
+    
+    - name: İşlem özet durumu
+      debug:
+        msg: "{{ '✓ İŞLEM BAŞARILI' if report_data.errors | length == 0 and report_data.servers_snapshot_failed | length == 0 else '✗ İŞLEM HATALARLA TAMAMLANDI' }}"

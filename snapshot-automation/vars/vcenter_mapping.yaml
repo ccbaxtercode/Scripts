@@ -1,0 +1,27 @@
+---
+# vCenter, Domain ve Datacenter Mapping Bilgileri
+# Domain bazlı arama stratejisi için vCenter listesi
+
+# Domain1: vCenter1 (DC1, DC2) ve vCenter2 (DC3) üzerinde arama yapılır
+# Domain2: Sadece vCenter2 (DC3) üzerinde belirli folder'da arama yapılır
+
+vcenter_list:
+  - name: "vcenter1"
+    hostname: "vcenter1.example.com"
+    datacenters:
+      - name: "DC1"
+        domain: "domain1"
+        folder: null  # Tüm folder'larda ara
+      - name: "DC2"
+        domain: "domain1"
+        folder: null  # Tüm folder'larda ara
+  
+  - name: "vcenter2"
+    hostname: "vcenter2.example.com"
+    datacenters:
+      - name: "DC3"
+        domain: "domain1"
+        folder: null  # Tüm folder'larda ara
+      - name: "DC3"
+        domain: "domain2"
+        folder: "/DC3/vm/Domain2"  # Sadece bu folder'da ara

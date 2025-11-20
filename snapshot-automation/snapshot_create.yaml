@@ -1,0 +1,260 @@
+---
+# =============================================================================
+# SNAPSHOT ALMA İŞLEMLERİ
+# =============================================================================
+# Bu task dosyası snapshot alma işlemlerini gerçekleştirir
+# 
+# İş Akışı:
+#   1. Python script ile VM'leri bul ve parametreleri topla
+#   2. Bulunan VM'lerde snapshot al
+#   3. Snapshot'ların alındığını doğrula
+#   4. AWX'te silme işi için schedule oluştur (VM parametrelerini ekle)
+#
+# Kullanılan Değişkenler:
+#   - server_list: İşlem yapılacak sunucu listesi
+#   - search_targets: Domain'e göre filtrelenmiş vCenter listesi
+#   - snapshot_retention_days: Snapshot tutulma süresi
+#   - service_desk_no: Servis desk numarası (schedule adı için)
+#   - report_data: Rapor verileri
+# =============================================================================
+
+- name: BLOCK - Snapshot Alma İşlemleri
+  block:
+    # =========================================================================
+    # Python Script ile VM'leri Bul
+    # =========================================================================
+    - name: Python script ile VM'leri bul ve parametreleri topla
+      block:
+        - name: Python script'in varlığını kontrol et
+          stat:
+            path: "{{ playbook_dir }}/files/find_vms_for_snapshot.py"
+          register: python_script
+        
+        - name: Hata - Python script bulunamadı
+          fail:
+            msg: "Python script bulunamadı: {{ playbook_dir }}/files/find_vms_for_snapshot.py"
+          when: not python_script.stat.exists
+        
+        - name: Python script'i çalıştır
+          shell: |
+            export VC_USER="{{ vcenter_username }}"
+            export VC_PASS="{{ vcenter_password }}"
+            python3 {{ playbook_dir }}/files/find_vms_for_snapshot.py \
+              '{{ server_list | to_json }}' \
+              '{{ search_targets | to_json }}' \
+              '{{ domain }}'
+          register: python_result
+          changed_when: false
+        
+        - name: Python script çıktısını parse et
+          set_fact:
+            vm_search_result: "{{ python_result.stdout | from_json }}"
+        
+        - name: Python script başarı kontrolü
+          fail:
+            msg: "Python script başarısız: {{ vm_search_result.error | default('Bilinmeyen hata') }}"
+          when: not vm_search_result.success | default(false)
+        
+        - name: VM bulma sonuçlarını göster
+          debug:
+            msg:
+              - "==================== VM BULMA SONUÇLARI ===================="
+              - "Toplam İstenen: {{ vm_search_result.total_requested }}"
+              - "Bulunan: {{ vm_search_result.vms_found | length }}"
+              - "Bulunamayan: {{ vm_search_result.vms_not_found | length }}"
+              - "Hatalı/Belirsiz: {{ vm_search_result.vms_with_errors | length }}"
+              - "==========================================================="
+        
+        - name: Rapor için bulunan VM'leri kaydet
+          set_fact:
+            report_data: "{{ report_data | combine({
+              'servers_found': vm_search_result.vms_found | map(attribute='name') | list,
+              'servers_not_found': vm_search_result.vms_not_found | map(attribute='name') | list,
+              'servers_with_errors': vm_search_result.vms_with_errors | map(attribute='name') | list
+            }) }}"
+        
+        - name: Uyarı - Hiç VM bulunamadı
+          fail:
+            msg: "HATA: Hiçbir VM bulunamadı. İşlem durduruluyor."
+          when: vm_search_result.vms_found | length == 0
+        
+        - name: Bulunan VM detaylarını göster
+          debug:
+            msg: "{{ item.name }} -> {{ item.vcenter }}/{{ item.datacenter }} (UUID: {{ item.uuid }})"
+          loop: "{{ vm_search_result.vms_found }}"
+          loop_control:
+            label: "{{ item.name }}"
+      
+      rescue:
+        - name: VM bulma hatası
+          set_fact:
+            report_data: "{{ report_data | combine({'errors': report_data.errors + ['VM bulma hatası: ' + (ansible_failed_result.msg | default('Bilinmeyen hata'))]}) }}"
+        
+        - name: Hata mesajını göster
+          debug:
+            msg: "HATA: VM bulma işlemi başarısız"
+        
+        - name: İşlemi durdur
+          fail:
+            msg: "VM bulma başarısız, snapshot işlemine devam edilemiyor"
+    
+    # =========================================================================
+    # Snapshot Al
+    # =========================================================================
+    - name: Bulunan VM'lerde snapshot al
+      block:
+        - name: Her VM için snapshot oluştur
+          community.vmware.vmware_guest_snapshot:
+            hostname: "{{ item.vcenter_hostname }}"
+            username: "{{ vcenter_username }}"
+            password: "{{ vcenter_password }}"
+            validate_certs: false
+            datacenter: "{{ item.datacenter }}"
+            uuid: "{{ item.uuid }}"
+            state: present
+            snapshot_name: "{{ service_desk_no }}_{{ ansible_date_time.date }}_{{ ansible_date_time.time | replace(':', '') }}"
+            description: "Snapshot - SD: {{ service_desk_no }} - User: {{ username }} - Domain: {{ domain }} - {{ ansible_date_time.iso8601 }}"
+            memory_dump: false
+            quiesce: true
+          register: snapshot_create_result
+          loop: "{{ vm_search_result.vms_found }}"
+          loop_control:
+            label: "{{ item.name }} ({{ item.vcenter }}/{{ item.datacenter }})"
+          ignore_errors: true
+        
+        - name: Başarılı snapshot işlemlerini kaydet
+          set_fact:
+            report_data: "{{ report_data | combine({'servers_snapshot_success': (snapshot_create_result.results | rejectattr('failed', 'defined') | map(attribute='item') | map(attribute='name') | list)}) }}"
+        
+        - name: Başarısız snapshot işlemlerini kaydet
+          set_fact:
+            report_data: "{{ report_data | combine({'servers_snapshot_failed': (snapshot_create_result.results | selectattr('failed', 'defined') | selectattr('failed', 'equalto', true) | map(attribute='item') | map(attribute='name') | list)}) }}"
+        
+        - name: Başarısız işlemler için hata mesajlarını kaydet
+          set_fact:
+            report_data: "{{ report_data | combine({'errors': report_data.errors + ['Snapshot alma hatası (' + item.item.name + '): ' + item.msg]}) }}"
+          loop: "{{ snapshot_create_result.results | selectattr('failed', 'defined') | selectattr('failed', 'equalto', true) | list }}"
+          loop_control:
+            label: "{{ item.item.name }}"
+        
+        - name: Snapshot alma sonuçlarını göster
+          debug:
+            msg:
+              - "==================== SNAPSHOT ALMA SONUÇLARI ===================="
+              - "Başarılı: {{ report_data.servers_snapshot_success | length }} VM"
+              - "{{ report_data.servers_snapshot_success | join(', ') if report_data.servers_snapshot_success | length > 0 else '  YOK' }}"
+              - ""
+              - "Başarısız: {{ report_data.servers_snapshot_failed | length }} VM"
+              - "{{ report_data.servers_snapshot_failed | join(', ') if report_data.servers_snapshot_failed | length > 0 else '  YOK' }}"
+              - "==============================================================="
+      
+      rescue:
+        - name: Snapshot alma genel hatası
+          set_fact:
+            report_data: "{{ report_data | combine({'errors': report_data.errors + ['Snapshot alma genel hatası: ' + (ansible_failed_result.msg | default('Bilinmeyen hata'))]}) }}"
+        
+        - name: Hata mesajını göster
+          debug:
+            msg: "HATA: Snapshot alma işlemi başarısız"
+    
+    # =========================================================================
+    # Snapshot Doğrulama
+    # =========================================================================
+    - name: Alınan snapshot'ları doğrula
+      block:
+        - name: Başarılı VM'ler için snapshot varlığını kontrol et
+          community.vmware.vmware_guest_snapshot_info:
+            hostname: "{{ item.vcenter_hostname }}"
+            username: "{{ vcenter_username }}"
+            password: "{{ vcenter_password }}"
+            validate_certs: false
+            datacenter: "{{ item.datacenter }}"
+            uuid: "{{ item.uuid }}"
+          register: snapshot_verify_result
+          loop: "{{ vm_search_result.vms_found | selectattr('name', 'in', report_data.servers_snapshot_success) | list }}"
+          loop_control:
+            label: "{{ item.name }}"
+          when: report_data.servers_snapshot_success | length > 0
+          ignore_errors: true
+        
+        - name: Snapshot doğrulama sonuçlarını göster
+          debug:
+            msg: "✓ {{ item.item.name }} için snapshot başarıyla doğrulandı (Toplam {{ item.guest_snapshots.snapshots | length }} snapshot mevcut)"
+          loop: "{{ snapshot_verify_result.results | default([]) }}"
+          loop_control:
+            label: "{{ item.item.name }}"
+          when: 
+            - snapshot_verify_result is defined
+            - snapshot_verify_result.results is defined
+            - item.guest_snapshots is defined
+            - item.guest_snapshots.snapshots | length > 0
+      
+      rescue:
+        - name: Snapshot doğrulama hatası
+          set_fact:
+            report_data: "{{ report_data | combine({'errors': report_data.errors + ['Snapshot doğrulama hatası: ' + (ansible_failed_result.msg | default('Bilinmeyen hata'))]}) }}"
+        
+        - name: Uyarı - Snapshot doğrulama başarısız
+          debug:
+            msg: "UYARI: Snapshot doğrulama yapılamadı ancak işlem devam ediyor"
+    
+    # =========================================================================
+    # AWX Schedule Oluşturma (VM Parametreleri ile)
+    # =========================================================================
+    - name: AWX'te snapshot silme schedule'ı oluştur
+      block:
+        - name: Schedule oluşturma tarihini hesapla
+          set_fact:
+            schedule_date: "{{ '%Y-%m-%dT%H:%M:%S' | strftime((ansible_date_time.epoch | int) + (snapshot_retention_days | int * 86400)) }}"
+        
+        - name: Başarılı VM'lerin parametrelerini hazırla
+          set_fact:
+            successful_vms_data: "{{ vm_search_result.vms_found | selectattr('name', 'in', report_data.servers_snapshot_success) | list }}"
+        
+        - name: AWX'te schedule oluştur
+          awx.awx.schedule:
+            name: "{{ service_desk_no }}"
+            unified_job_template: "Snapshot Otomasyon"
+            rrule: "DTSTART:{{ schedule_date | replace(':', '') | replace('-', '') }}Z RRULE:FREQ=DAILY;INTERVAL=1;COUNT=1"
+            description: "Snapshot silme işi - SD: {{ service_desk_no }} - User: {{ username }} - Domain: {{ domain }}"
+            enabled: true
+            extra_data:
+              username: "{{ username }}"
+              service_desk_no: "{{ service_desk_no }}"
+              domain: "{{ domain }}"
+              snapshot_retention_days: "{{ snapshot_retention_days }}"
+              operation: "delete"
+              vm_data: "{{ successful_vms_data }}"
+            tower_host: "{{ awx_host }}"
+            tower_username: "{{ awx_username }}"
+            tower_password: "{{ awx_password }}"
+            validate_certs: false
+          register: schedule_result
+        
+        - name: Schedule oluşturma başarılı
+          debug:
+            msg: 
+              - "==================== SCHEDULE OLUŞTURULDU ===================="
+              - "Schedule Adı: {{ service_desk_no }}"
+              - "Silme Tarihi: {{ schedule_date }}"
+              - "Kapsam: {{ report_data.servers_snapshot_success | length }} VM"
+              - "  {{ report_data.servers_snapshot_success | join(', ') }}"
+              - "=============================================================="
+      
+      rescue:
+        - name: Schedule oluşturma hatası
+          set_fact:
+            report_data: "{{ report_data | combine({'errors': report_data.errors + ['Schedule oluşturma hatası: ' + (ansible_failed_result.msg | default('Bilinmeyen hata'))]}) }}"
+        
+        - name: Uyarı - Schedule oluşturulamadı
+          debug:
+            msg: "⚠ UYARI: AWX schedule oluşturulamadı. Snapshot'lar manuel silinmelidir!"
+  
+  rescue:
+    - name: Snapshot alma işlemi genel hatası
+      set_fact:
+        report_data: "{{ report_data | combine({'errors': report_data.errors + ['Snapshot alma işlemi genel hatası: ' + (ansible_failed_result.msg | default('Bilinmeyen hata'))]}) }}"
+    
+    - name: Genel hata mesajı
+      debug:
+        msg: "HATA: Snapshot alma işlemi başarısız oldu"
