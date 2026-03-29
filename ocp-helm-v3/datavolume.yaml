@@ -1,0 +1,60 @@
+# ============================================================================
+# DataVolumes for All Master Nodes
+# Each master gets a dedicated DataVolume with Ubuntu 22.04 OS
+# Import from HTTP URL - takes 5-10 minutes per DataVolume
+# ============================================================================
+{{- range $i := until (int .Values.masterCount) }}
+---
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: DataVolume
+metadata:
+  name: {{ $.Release.Name }}-master-{{ $i }}-disk
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "k3s.labels" $ | nindent 4 }}
+    component: master
+    vm-name: {{ $.Release.Name }}-master-{{ $i }}
+    vm-index: "{{ $i }}"
+spec:
+  source:
+    # Import Ubuntu 22.04 cloud image from HTTP URL
+    http:
+      url: {{ required "A valid .Values.ubuntuImageURL is required!" $.Values.ubuntuImageURL }}
+  pvc:
+    accessModes:
+      - ReadWriteOnce
+    storageClassName: {{ required "A valid .Values.storageClassName is required!" $.Values.storageClassName }}
+    resources:
+      requests:
+        storage: {{ $.Values.vmResources.diskSize }}
+{{- end }}
+
+# ============================================================================
+# DataVolumes for All Worker Nodes
+# Each worker gets a dedicated DataVolume with Ubuntu 22.04 OS
+# ============================================================================
+{{- range $i := until (int .Values.workerCount) }}
+---
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: DataVolume
+metadata:
+  name: {{ $.Release.Name }}-worker-{{ $i }}-disk
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "k3s.labels" $ | nindent 4 }}
+    component: worker
+    vm-name: {{ $.Release.Name }}-worker-{{ $i }}
+    vm-index: "{{ $i }}"
+spec:
+  source:
+    # Import Ubuntu 22.04 cloud image from HTTP URL
+    http:
+      url: {{ $.Values.ubuntuImageURL }}
+  pvc:
+    accessModes:
+      - ReadWriteOnce
+    storageClassName: {{ $.Values.storageClassName }}
+    resources:
+      requests:
+        storage: {{ $.Values.vmResources.diskSize }}
+{{- end }}

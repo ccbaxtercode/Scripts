@@ -1,0 +1,19 @@
+apiVersion: v2
+name: k3s-openshift-virt
+description: K3s Kubernetes cluster on OpenShift Virtualization with MetalLB LoadBalancer
+type: application
+version: 1.0.0
+appVersion: "v1.28.5+k3s1"
+keywords:
+  - k3s
+  - kubernetes
+  - openshift
+  - virtualization
+  - kubevirt
+  - metallb
+maintainers:
+  - name: K3s on OpenShift Team
+home: https://k3s.io
+sources:
+  - https://github.com/k3s-io/k3s
+icon: https://k3s.io/img/k3s-logo-light.svg

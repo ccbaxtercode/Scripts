@@ -1,0 +1,90 @@
+╔══════════════════════════════════════════════════════════════════════╗
+║        K3s Cluster on OpenShift Virtualization Deployed!            ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+🎉 Your K3s cluster "{{ .Values.clusterName }}" is being deployed!
+
+📊 Cluster Configuration:
+   • Cluster Name: {{ .Values.clusterName }}
+   • Master Nodes: {{ .Values.masterCount }}
+   • Worker Nodes: {{ .Values.workerCount }}
+   • K3s Version: {{ .Values.k3sVersion }}
+   • Namespace: {{ .Release.Namespace }}
+
+📈 Monitor Deployment:
+
+   Watch Jobs:
+   $ oc get jobs -n {{ .Release.Namespace }} -w
+   
+   Watch VMs:
+   $ oc get vm,vmi -n {{ .Release.Namespace }}
+   
+   Check Service External IP (from MetalLB):
+   $ oc get service {{ .Release.Name }}-k3s-api -n {{ .Release.Namespace }}
+
+⏱️  Deployment Steps (Total: 10-15 minutes):
+
+   1. DataVolumes import Ubuntu images (5-10 min)
+   2. MetalLB assigns External IP to Service
+   3. Job-01: Create Master-0 (3-5 min)
+   {{- if gt (int .Values.masterCount) 1 }}
+   4. Job-02: Create additional masters (2-3 min)
+   {{- end }}
+   {{- if gt (int .Values.workerCount) 0 }}
+   5. Job-03: Create workers (2-3 min)
+   {{- end }}
+   6. Job-04: Fetch kubeconfig (1 min)
+
+📥 After Deployment Completes:
+
+   1. Get Cluster Information:
+      $ oc get secret {{ .Release.Name }}-cluster-info -n {{ .Release.Namespace }} -o yaml
+   
+   2. Get Service External IP:
+      $ oc get service {{ .Release.Name }}-k3s-api \
+          -n {{ .Release.Namespace }} \
+          -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+   
+   3. Download Kubeconfig:
+      $ oc get secret {{ .Release.Name }}-kubeconfig \
+          -n {{ .Release.Namespace }} \
+          -o jsonpath='{.data.kubeconfig}' | base64 -d > k3s-kubeconfig.yaml
+   
+   4. Use Kubeconfig:
+      $ export KUBECONFIG=k3s-kubeconfig.yaml
+      $ kubectl get nodes
+      $ kubectl get pods -A
+
+👤 VM Access Credentials:
+   • Username: {{ .Values.username }}
+   • Password: {{ .Values.password }}
+
+🔌 Connect to VMs:
+
+   Console (requires virtctl):
+   $ virtctl console {{ .Release.Name }}-master-0 -n {{ .Release.Namespace }}
+   
+   SSH (requires virtctl):
+   $ virtctl ssh {{ .Values.username }}@{{ .Release.Name }}-master-0 -n {{ .Release.Namespace }}
+
+🆘 Troubleshooting:
+
+   Check Job Logs:
+   $ oc logs job/{{ .Release.Name }}-01-create-master0 -n {{ .Release.Namespace }}
+   
+   Check VM Status:
+   $ oc describe vm {{ .Release.Name }}-master-0 -n {{ .Release.Namespace }}
+   
+   Check DataVolume:
+   $ oc get datavolume -n {{ .Release.Namespace }}
+
+🗑️  Uninstall:
+
+   $ helm uninstall {{ .Release.Name }} -n {{ .Release.Namespace }}
+   
+   # Also delete PVCs if needed:
+   $ oc delete pvc -l release={{ .Release.Name }} -n {{ .Release.Namespace }}
+
+📚 Documentation: {{ .Chart.Home }}
+
+Happy K3s clustering! 🚀

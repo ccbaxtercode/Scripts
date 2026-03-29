@@ -1,0 +1,28 @@
+# ============================================================================
+# K3s API Service (LoadBalancer)
+# MetalLB will assign an external IP to this service
+# VMs will use this external IP to join the cluster
+# 
+# Usage:
+#   - Internal: cluster.svc:6443
+#   - External: <metallb-ip>:6443
+# ============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "k3s.serviceName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "k3s.labels" . | nindent 4 }}
+    component: api
+spec:
+  # LoadBalancer type - MetalLB will assign external IP
+  type: LoadBalancer
+  ports:
+    - name: https
+      port: 6443
+      targetPort: 6443
+      protocol: TCP
+  # Only route traffic to master nodes (they run K3s API server)
+  selector:
+    {{- include "k3s.masterSelectorLabels" . | nindent 4 }}
