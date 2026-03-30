@@ -1,0 +1,294 @@
+# ============================================================================
+# Job 1: Create Master-0 VM
+# 
+# Steps:
+#   1. Wait for Service to get MetalLB External IP
+#   2. Save Service IP to Secret
+#   3. Wait for Master-0 DataVolume ready
+#   4. Create Master-0 VM (cloud-init reads Service IP)
+#   5. Wait for VMI and K3s ready
+# ============================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-01-create-master0
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "k3s.labels" . | nindent 4 }}
+    component: deployment
+    deployment-step: "01"
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "k3s.labels" . | nindent 8 }}
+        component: deployment
+    spec:
+      serviceAccountName: {{ .Release.Name }}-k3s-deployer
+      restartPolicy: OnFailure
+      containers:
+        - name: create-master0
+          image: quay.io/openshift/origin-cli:latest
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              echo "=========================================="
+              echo "Job 1: Master-0 Deployment"
+              echo "=========================================="
+              
+              # STEP 1: Wait for Service External IP from MetalLB
+              echo ""
+              echo "STEP 1: Waiting for MetalLB to assign External IP..."
+              MAX_WAIT=300
+              ELAPSED=0
+              SERVICE_IP=""
+              
+              while [ $ELAPSED -lt $MAX_WAIT ]; do
+                SERVICE_IP=$(oc get service {{ include "k3s.serviceName" . }} \
+                  -n {{ .Release.Namespace }} \
+                  -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+                
+                if [ -n "$SERVICE_IP" ]; then
+                  echo "✓ Service External IP: $SERVICE_IP"
+                  break
+                fi
+                
+                echo "Waiting for MetalLB... (${ELAPSED}s)"
+                sleep 5
+                ELAPSED=$((ELAPSED + 5))
+              done
+              
+              if [ -z "$SERVICE_IP" ]; then
+                echo "ERROR: Service did not get External IP from MetalLB"
+                exit 1
+              fi
+              
+              # STEP 2: Save Service IP to Secret
+              echo ""
+              echo "STEP 2: Saving Service IP to Secret..."
+              cat <<EOF | oc apply -f -
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: {{ .Release.Name }}-service-ip
+                namespace: {{ .Release.Namespace }}
+                labels:
+                  {{- include "k3s.labels" . | nindent 18 }}
+              type: Opaque
+              stringData:
+                ip: "$SERVICE_IP"
+              EOF
+              
+              echo "✓ Service IP saved to secret"
+              
+              # STEP 3: Wait for DataVolume
+              echo ""
+              echo "STEP 3: Waiting for Master-0 DataVolume..."
+              MAX_WAIT=900
+              ELAPSED=0
+              
+              while [ $ELAPSED -lt $MAX_WAIT ]; do
+                DV_PHASE=$(oc get datavolume {{ .Release.Name }}-master-0-disk \
+                  -n {{ .Release.Namespace }} \
+                  -o jsonpath='{.status.phase}' 2>/dev/null || echo "NotFound")
+                
+                echo "DataVolume: $DV_PHASE (${ELAPSED}s)"
+                
+                if [ "$DV_PHASE" = "Succeeded" ]; then
+                  echo "✓ DataVolume ready"
+                  break
+                fi
+                
+                if [ "$DV_PHASE" = "Failed" ]; then
+                  echo "ERROR: DataVolume failed"
+                  exit 1
+                fi
+                
+                sleep 10
+                ELAPSED=$((ELAPSED + 10))
+              done
+              
+              # Wait for importer pod
+              IMPORTER=$(oc get pod -n {{ .Release.Namespace }} \
+                -l cdi.kubevirt.io/dataVolume={{ .Release.Name }}-master-0-disk \
+                -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+              
+              if [ -n "$IMPORTER" ]; then
+                oc wait --for=condition=complete pod/$IMPORTER \
+                  -n {{ .Release.Namespace }} --timeout=300s || true
+              fi
+              
+              # Verify PVC
+              PVC_STATUS=$(oc get pvc {{ .Release.Name }}-master-0-disk \
+                -n {{ .Release.Namespace }} \
+                -o jsonpath='{.status.phase}' || echo "")
+              
+              if [ "$PVC_STATUS" != "Bound" ]; then
+                echo "ERROR: PVC not bound"
+                exit 1
+              fi
+              
+              sleep 10
+              
+              # STEP 4: Create Master-0 VM
+              echo ""
+              echo "STEP 4: Creating Master-0 VM..."
+              
+              cat <<EOF | oc apply -f -
+              apiVersion: kubevirt.io/v1
+              kind: VirtualMachine
+              metadata:
+                name: {{ .Release.Name }}-master-0
+                namespace: {{ .Release.Namespace }}
+                labels:
+                  {{- include "k3s.masterSelectorLabels" . | nindent 18 }}
+                  vm-index: "0"
+              spec:
+                running: true
+                template:
+                  metadata:
+                    labels:
+                      {{- include "k3s.masterSelectorLabels" . | nindent 22 }}
+                      vm-index: "0"
+                      kubevirt.io/domain: {{ .Release.Name }}-master-0
+                  spec:
+                    domain:
+                      cpu:
+                        cores: {{ .Values.vmResources.cpu }}
+                      memory:
+                        guest: {{ .Values.vmResources.memory }}
+                      devices:
+                        disks:
+                          - name: datadisk
+                            bootOrder: 1
+                            disk:
+                              bus: virtio
+                          - name: cloudinitdisk
+                            disk:
+                              bus: virtio
+                        interfaces:
+                          - name: default
+                            masquerade: {}
+                      resources:
+                        requests:
+                          memory: {{ .Values.vmResources.memory }}
+                    networks:
+                      - name: default
+                        pod: {}
+                    volumes:
+                      - name: datadisk
+                        persistentVolumeClaim:
+                          claimName: {{ .Release.Name }}-master-0-disk
+                      - name: cloudinitdisk
+                        cloudInitNoCloud:
+                          userData: |
+                            #cloud-config
+                            # Master-0: First master node, initializes K3s cluster
+                            
+                            hostname: {{ .Release.Name }}-master-0
+                            fqdn: {{ .Release.Name }}-master-0.{{ .Release.Namespace }}.svc.cluster.local
+                            manage_etc_hosts: true
+                            
+                            users:
+                              - name: {{ .Values.username }}
+                                sudo: ALL=(ALL) NOPASSWD:ALL
+                                groups: sudo
+                                shell: /bin/bash
+                                lock_passwd: false
+                                passwd: {{ .Values.password | b64enc }}
+                                {{- if .Values.sshPublicKey }}
+                                ssh_authorized_keys:
+                                  - {{ .Values.sshPublicKey }}
+                                {{- end }}
+                            
+                            ssh_pwauth: true
+                            
+                            package_update: true
+                            package_upgrade: false
+                            
+                            packages:
+                              - curl
+                              - wget
+                              - vim
+                              - openssh-server
+                              - sshpass
+                            
+                            growpart:
+                              mode: auto
+                              devices: ['/']
+                            
+                            runcmd:
+                              - hostnamectl set-hostname {{ .Release.Name }}-master-0
+                              - until ping -c1 8.8.8.8 &>/dev/null; do sleep 2; done
+                              - resize2fs /dev/vda1 || resize2fs /dev/vda || true
+                              - systemctl enable ssh && systemctl start ssh
+                              
+                              # Install K3s with Service External IP
+                              - |
+                                curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION={{ .Values.k3sVersion }} \
+                                  K3S_TOKEN={{ include "k3s.clusterToken" . }} \
+                                  sh -s - server \
+                                  --cluster-init \
+                                  --tls-san=$SERVICE_IP \
+                                  --tls-san={{ include "k3s.serviceName" . }} \
+                                  --tls-san={{ include "k3s.serviceName" . }}.{{ .Release.Namespace }}.svc \
+                                  --write-kubeconfig-mode=644
+                              
+                              - until kubectl get nodes &>/dev/null; do sleep 2; done
+                              - echo "Master-0 ready!"
+              EOF
+              
+              echo "✓ VM created"
+              
+              # STEP 5: Wait for VMI
+              echo ""
+              echo "STEP 5: Waiting for VMI..."
+              MAX_WAIT=300
+              ELAPSED=0
+              
+              while [ $ELAPSED -lt $MAX_WAIT ]; do
+                VMI_PHASE=$(oc get vmi {{ .Release.Name }}-master-0 \
+                  -n {{ .Release.Namespace }} \
+                  -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+                
+                if [ "$VMI_PHASE" = "Running" ]; then
+                  echo "✓ VMI running"
+                  break
+                fi
+                
+                echo "VMI: $VMI_PHASE"
+                sleep 5
+                ELAPSED=$((ELAPSED + 5))
+              done
+              
+              # STEP 6: Wait for K3s
+              echo ""
+              echo "STEP 6: Waiting for K3s (90s)..."
+              sleep 90
+              
+              echo ""
+              echo "STEP 7: Verify K3s API..."
+              MAX_RETRIES=60
+              RETRY=0
+              
+              while [ $RETRY -lt $MAX_RETRIES ]; do
+                if curl -k -s --connect-timeout 5 https://${SERVICE_IP}:6443/ping &>/dev/null; then
+                  echo "✓ K3s API responding"
+                  break
+                fi
+                sleep 5
+                RETRY=$((RETRY + 1))
+              done
+              
+              echo ""
+              echo "=========================================="
+              echo "✓ Master-0 Ready!"
+              echo "  Service IP: $SERVICE_IP"
+              echo "=========================================="
+          env:
+            - name: HOME
+              value: /tmp

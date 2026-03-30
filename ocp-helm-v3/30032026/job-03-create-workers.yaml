@@ -1,0 +1,232 @@
+# ============================================================================
+# Job 3: Create Worker VMs (if workerCount > 0)
+# Waits for all masters, then creates workers
+# Uses Service External IP to join cluster
+# ============================================================================
+{{- if gt (int .Values.workerCount) 0 }}
+{{- range $i := until (int .Values.workerCount) }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $.Release.Name }}-worker-{{ $i }}-cloudinit
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "k3s.labels" $ | nindent 4 }}
+type: Opaque
+stringData:
+  userdata: |
+    #cloud-config
+    hostname: {{ $.Release.Name }}-worker-{{ $i }}
+    fqdn: {{ $.Release.Name }}-worker-{{ $i }}.{{ $.Release.Namespace }}.svc.cluster.local
+    manage_etc_hosts: true
+    
+    users:
+      - name: {{ $.Values.username }}
+        sudo: ALL=(ALL) NOPASSWD:ALL
+        groups: sudo
+        shell: /bin/bash
+        lock_passwd: false
+        passwd: {{ $.Values.password | b64enc }}
+        {{- if $.Values.sshPublicKey }}
+        ssh_authorized_keys:
+          - {{ $.Values.sshPublicKey }}
+        {{- end }}
+    
+    ssh_pwauth: true
+    package_update: true
+    package_upgrade: false
+    packages: [curl, wget, vim, openssh-server, sshpass]
+    
+    growpart:
+      mode: auto
+      devices: ['/']
+    
+    runcmd:
+      - hostnamectl set-hostname {{ $.Release.Name }}-worker-{{ $i }}
+      - until ping -c1 8.8.8.8 &>/dev/null; do sleep 2; done
+      - resize2fs /dev/vda1 || resize2fs /dev/vda || true
+      - systemctl enable ssh && systemctl start ssh
+      
+      # Read Service External IP
+      - SERVICE_IP=$(cat /var/lib/cloud/k3s-service-ip.txt)
+      
+      # Wait for K3s API
+      - until curl -k -s https://$SERVICE_IP:6443/ping &>/dev/null; do sleep 5; done
+      
+      # Join as worker
+      - |
+        curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION={{ $.Values.k3sVersion }} \
+          K3S_URL=https://$SERVICE_IP:6443 \
+          K3S_TOKEN={{ include "k3s.clusterToken" $ }} \
+          sh -s - agent
+      
+      - echo "Worker-{{ $i }} ready!"
+{{- end }}
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-03-create-workers
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "k3s.labels" . | nindent 4 }}
+    component: deployment
+    deployment-step: "03"
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "k3s.labels" . | nindent 8 }}
+        component: deployment
+    spec:
+      serviceAccountName: {{ .Release.Name }}-k3s-deployer
+      restartPolicy: OnFailure
+      
+      initContainers:
+        - name: wait-for-masters
+          image: quay.io/openshift/origin-cli:latest
+          command:
+            - /bin/bash
+            - -c
+            - |
+              echo "Waiting for masters..."
+              while true; do
+                J1=$(oc get job {{ .Release.Name }}-01-create-master0 \
+                  -n {{ .Release.Namespace }} \
+                  -o jsonpath='{.status.succeeded}' 2>/dev/null || echo "0")
+                [ "$J1" = "1" ] && break
+                sleep 5
+              done
+              
+              {{- if gt (int .Values.masterCount) 1 }}
+              while true; do
+                J2=$(oc get job {{ .Release.Name }}-02-create-masters \
+                  -n {{ .Release.Namespace }} \
+                  -o jsonpath='{.status.succeeded}' 2>/dev/null || echo "0")
+                [ "$J2" = "1" ] && break
+                sleep 5
+              done
+              {{- end }}
+              
+              echo "✓ Masters ready"
+          env:
+            - name: HOME
+              value: /tmp
+      
+      containers:
+        - name: create-workers
+          image: quay.io/openshift/origin-cli:latest
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              echo "Job 3: Creating Workers"
+              
+              # Get Service IP
+              SERVICE_IP=$(oc get secret {{ .Release.Name }}-service-ip \
+                -n {{ .Release.Namespace }} \
+                -o jsonpath='{.data.ip}' | base64 -d)
+              
+              {{- range $i := until (int .Values.workerCount) }}
+              
+              # Update CloudInit Secret with Service IP dynamically
+              mkdir -p /tmp/cloudinit
+              oc get secret {{ $.Release.Name }}-worker-{{ $i }}-cloudinit \
+                -n {{ $.Release.Namespace }} \
+                -o jsonpath='{.data.userdata}' | base64 -d > /tmp/cloudinit/userdata-{{ $i }}.yaml
+              
+              cat << EOF >> /tmp/cloudinit/userdata-{{ $i }}.yaml
+              
+              write_files:
+                - path: /var/lib/cloud/k3s-service-ip.txt
+                  content: "$SERVICE_IP"
+                  permissions: '0644'
+              EOF
+              
+              oc set data secret/{{ $.Release.Name }}-worker-{{ $i }}-cloudinit \
+                -n {{ $.Release.Namespace }} \
+                --from-file=userdata=/tmp/cloudinit/userdata-{{ $i }}.yaml
+              
+              # Wait for DataVolume
+              while true; do
+                DV=$(oc get datavolume {{ $.Release.Name }}-worker-{{ $i }}-disk \
+                  -n {{ $.Release.Namespace }} \
+                  -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+                [ "$DV" = "Succeeded" ] && break
+                sleep 10
+              done
+              
+              # Create Worker VM
+              cat <<EOF | oc apply -f -
+              apiVersion: kubevirt.io/v1
+              kind: VirtualMachine
+              metadata:
+                name: {{ $.Release.Name }}-worker-{{ $i }}
+                namespace: {{ $.Release.Namespace }}
+                labels:
+                  {{- include "k3s.workerSelectorLabels" $ | nindent 18 }}
+                  vm-index: "{{ $i }}"
+              spec:
+                running: true
+                template:
+                  metadata:
+                    labels:
+                      {{- include "k3s.workerSelectorLabels" $ | nindent 22 }}
+                      vm-index: "{{ $i }}"
+                      kubevirt.io/domain: {{ $.Release.Name }}-worker-{{ $i }}
+                  spec:
+                    domain:
+                      cpu:
+                        cores: {{ $.Values.vmResources.cpu }}
+                      memory:
+                        guest: {{ $.Values.vmResources.memory }}
+                      devices:
+                        disks:
+                          - name: datadisk
+                            bootOrder: 1
+                            disk:
+                              bus: virtio
+                          - name: cloudinitdisk
+                            disk:
+                              bus: virtio
+                        interfaces:
+                          - name: default
+                            masquerade: {}
+                      resources:
+                        requests:
+                          memory: {{ $.Values.vmResources.memory }}
+                    networks:
+                      - name: default
+                        pod: {}
+                    volumes:
+                      - name: datadisk
+                        persistentVolumeClaim:
+                          claimName: {{ $.Release.Name }}-worker-{{ $i }}-disk
+                      - name: cloudinitdisk
+                        cloudInitNoCloud:
+                          secretRef:
+                            name: {{ $.Release.Name }}-worker-{{ $i }}-cloudinit
+              EOF
+              
+              # Wait for VMI
+              while true; do
+                VMI=$(oc get vmi {{ $.Release.Name }}-worker-{{ $i }} \
+                  -n {{ $.Release.Namespace }} \
+                  -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+                [ "$VMI" = "Running" ] && break
+                sleep 5
+              done
+              
+              echo "✓ Worker-{{ $i }} running"
+              {{- end }}
+              
+              echo "All workers ready!"
+          env:
+            - name: HOME
+              value: /tmp
+{{- end }}

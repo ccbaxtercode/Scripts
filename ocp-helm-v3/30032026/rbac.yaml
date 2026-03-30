@@ -1,0 +1,77 @@
+# ============================================================================
+# Role for K3s Deployment Jobs
+# Defines permissions needed by Jobs to manage K3s cluster deployment
+# ============================================================================
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Release.Name }}-k3s-deployer
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "k3s.labels" . | nindent 4 }}
+rules:
+  # Manage secrets (credentials, token, kubeconfig, service-ip)
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "create", "update", "patch"]
+  
+  # Access pods (for VMI pod exec)
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  
+  # Execute commands in VMI pods
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  
+  # Manage VirtualMachines
+  - apiGroups: ["kubevirt.io"]
+    resources: ["virtualmachines"]
+    verbs: ["get", "list", "create", "update", "patch"]
+  
+  # Check VirtualMachineInstance status
+  - apiGroups: ["kubevirt.io"]
+    resources: ["virtualmachineinstances"]
+    verbs: ["get", "list"]
+  
+  # Access VMI console
+  - apiGroups: ["subresources.kubevirt.io"]
+    resources: ["virtualmachineinstances/console"]
+    verbs: ["get"]
+  
+  # Manage DataVolumes (for persistent OS disks)
+  - apiGroups: ["cdi.kubevirt.io"]
+    resources: ["datavolumes"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  
+  # Check service status and get external IP
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list"]
+  
+  # Check job status for job chaining
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch"]
+
+---
+# ============================================================================
+# RoleBinding for K3s Deployment Jobs
+# Binds the Role to the ServiceAccount
+# ============================================================================
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Release.Name }}-k3s-deployer
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "k3s.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ .Release.Name }}-k3s-deployer
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Release.Name }}-k3s-deployer
+    namespace: {{ .Release.Namespace }}
