@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Create OpenShift Project</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 600px;
+      margin: 30px auto;
+      padding: 20px;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      min-height: 100vh;
+    }
+    .container {
+      background: white;
+      padding: 35px;
+      border-radius: 16px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+    h1 { margin: 0 0 5px; color: #ee0000; font-size: 24px; }
+    .subtitle { color: #666; margin-bottom: 25px; font-size: 14px; }
+    h2 {
+      margin: 25px 0 15px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid #f0f0f0;
+      color: #333;
+      font-size: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    h2::before { content: ''; width: 4px; height: 18px; background: #ee0000; border-radius: 2px; }
+    label { display: block; margin-top: 12px; font-weight: 500; color: #333; font-size: 14px; }
+    .hint { font-size: 12px; color: #888; margin-top: 3px; }
+    input, select {
+      width: 100%;
+      padding: 12px;
+      margin-top: 5px;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      font-size: 14px;
+      transition: border-color 0.3s;
+    }
+    input:focus, select:focus { outline: none; border-color: #ee0000; }
+    .row { display: flex; gap: 15px; }
+    .col { flex: 1; }
+    .checkbox-row { display: flex; align-items: center; gap: 10px; margin-top: 15px; }
+    .checkbox-row input[type="checkbox"] { width: 20px; height: 20px; cursor: pointer; }
+    .checkbox-row label { margin: 0; font-weight: 400; cursor: pointer; }
+    .info-box { background: #e7f3ff; border: 1px solid #b3d7ff; border-radius: 8px; padding: 12px; margin-bottom: 10px; font-size: 13px; color: #004085; }
+    .info-box.network { background: #fff3cd; border-color: #ffc107; color: #856404; }
+    button { width: 100%; padding: 16px; margin-top: 30px; background: linear-gradient(135deg, #ee0000 0%, #b30000 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600; transition: transform 0.2s, box-shadow 0.2s; }
+    button:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(238,0,0,0.3); }
+    button:disabled { background: #ccc; cursor: not-allowed; transform: none; box-shadow: none; }
+    #message { margin-top: 20px; padding: 15px; border-radius: 8px; display: none; white-space: pre-wrap; font-size: 13px; line-height: 1.6; }
+    .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+    .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+    .info { background: #cce5ff; color: #004085; border: 1px solid #b3d7ff; }
+
+    /* Modal */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.6);
+      z-index: 1000;
+      justify-content: center;
+      align-items: center;
+      animation: fadeIn 0.2s ease;
+    }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    .modal {
+      background: white;
+      border-radius: 16px;
+      max-width: 500px;
+      width: 90%;
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: 0 25px 80px rgba(0,0,0,0.4);
+      animation: slideUp 0.3s ease;
+    }
+    @keyframes slideUp { from { transform: translateY(30px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    .modal-header {
+      padding: 20px 25px;
+      border-bottom: 1px solid #eee;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .modal-header h3 { margin: 0; color: #333; font-size: 18px; }
+    .modal-header .icon { font-size: 24px; }
+    .modal-body { padding: 25px; }
+    .modal-body h4 { margin: 0 0 15px; color: #ee0000; font-size: 15px; }
+    .info-grid { display: grid; grid-template-columns: 140px 1fr; gap: 10px 15px; }
+    .info-grid dt { font-weight: 600; color: #555; }
+    .info-grid dd { margin: 0; color: #333; }
+    .modal-footer { padding: 15px 25px; border-top: 1px solid #eee; display: flex; gap: 12px; justify-content: flex-end; }
+    .btn-modal {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-cancel { background: #f0f0f0; color: #333; }
+    .btn-cancel:hover { background: #e0e0e0; }
+    .btn-confirm { background: #28a745; color: white; }
+    .btn-confirm:hover { background: #218838; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Create OpenShift Project</h1>
+    <p class="subtitle">Pipeline-triggered project creation</p>
+    <div style="text-align: center; margin: 20px 0;">
+      <svg width="80" height="80" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="256" cy="256" r="230" stroke="#ee0000" stroke-width="20"/>
+        <circle cx="256" cy="256" r="35" fill="#ee0000"/>
+        <path d="M256 150 L256 256 L195 195" stroke="#ee0000" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M256 256 L256 370" stroke="#ee0000" stroke-width="18" stroke-linecap="round"/>
+        <path d="M195 340 L256 400 L317 340" stroke="#ee0000" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+
+    <form id="projectForm">
+      <h2>Project Details</h2>
+      <label for="projectName">Project Name</label>
+      <input type="text" id="projectName" required placeholder="my-new-project">
+
+      <h2>Role Assignment</h2>
+      <label for="assignmentType">Assignment Type</label>
+      <select id="assignmentType" required>
+        <option value="">Select type...</option>
+        <option value="user">User</option>
+        <option value="group">Group</option>
+      </select>
+
+      <label for="userOrGroup">Select User or Group</label>
+      <div id="userDropdown" style="display: none; position: relative;">
+        <div id="userDropdownBtn" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px; background: white; cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
+          <span id="userDropdownText">Select users...</span>
+          <span style="color: #888;">▼</span>
+        </div>
+        <div id="userDropdownList" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #ddd; border-radius: 8px; margin-top: 4px; max-height: 200px; overflow-y: auto; z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.1);"></div>
+      </div>
+      <select id="userOrGroup" required disabled>
+        <option value="">Select type first...</option>
+      </select>
+
+      <h2>Resource Quotas</h2>
+      <div class="row">
+        <div class="col">
+          <label for="cpuRequest">CPU Request (cores)</label>
+          <input type="text" id="cpuRequest" value="2">
+          <div class="hint">e.g., 1, 2, 0.5</div>
+        </div>
+        <div class="col">
+          <label for="memoryRequest">Memory Request</label>
+          <input type="text" id="memoryRequest" value="4Gi">
+          <div class="hint">e.g., 4Gi, 512Mi</div>
+        </div>
+      </div>
+      <label for="storageRequest">Storage Request</label>
+      <input type="text" id="storageRequest" value="10Gi">
+      <div class="hint">e.g., 10Gi, 100Gi</div>
+
+      <button type="submit" id="submitBtn">Create Project</button>
+    </form>
+    
+    <div id="message"></div>
+  </div>
+
+  <!-- Approval Modal -->
+  <div class="modal-overlay" id="approvalModal">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="icon">📋</span>
+        <h3>Confirm Project Creation</h3>
+      </div>
+      <div class="modal-body">
+        <h4>Please review the project details:</h4>
+        <dl class="info-grid" id="projectSummary"></dl>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-modal btn-cancel" id="btnCancel">Cancel</button>
+        <button class="btn-modal btn-confirm" id="btnConfirm">Confirm & Create</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const mockUsers = ['admin', 'developer', 'test-user', 'john.doe', 'jane.smith'];
+    const mockGroups = ['developers', 'admins', 'qa-team', 'devops'];
+
+    const assignmentType = document.getElementById('assignmentType');
+    const userOrGroup = document.getElementById('userOrGroup');
+    const message = document.getElementById('message');
+    const submitBtn = document.getElementById('submitBtn');
+    const modal = document.getElementById('approvalModal');
+    const projectSummary = document.getElementById('projectSummary');
+
+    let pendingData = null;
+    window.selectedUsers = new Set();
+
+    assignmentType.addEventListener('change', function() {
+      const userDropdown = document.getElementById('userDropdown');
+      const userDropdownList = document.getElementById('userDropdownList');
+      const userDropdownBtn = document.getElementById('userDropdownBtn');
+      window.selectedUsers = new Set();
+      
+      if (this.value === 'user') {
+        userOrGroup.style.display = 'none';
+        userDropdown.style.display = 'block';
+        userDropdownList.innerHTML = '';
+        window.selectedUsers = new Set();
+        document.getElementById('userDropdownText').textContent = 'Select users...';
+        mockUsers.forEach(user => {
+          userDropdownList.innerHTML += `
+            <div class="user-option" data-user="${user}" style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; cursor: pointer;">
+              <span>${user}</span>
+              <span class="check-icon" style="color: #ccc; font-weight: bold;">✓</span>
+            </div>
+          `;
+        });
+        userOrGroup.required = false;
+      } else {
+        userOrGroup.style.display = 'block';
+        userDropdown.style.display = 'none';
+        userOrGroup.innerHTML = '<option value="">Loading...</option>';
+        setTimeout(() => {
+          userOrGroup.innerHTML = '<option value="">Select...</option>';
+          mockGroups.forEach(item => {
+            userOrGroup.innerHTML += `<option value="${item}">${item}</option>`;
+          });
+          userOrGroup.disabled = false;
+        }, 100);
+        userOrGroup.required = true;
+      }
+    });
+
+    userDropdownBtn.addEventListener('click', function() {
+      userDropdownList.style.display = userDropdownList.style.display === 'block' ? 'none' : 'block';
+    });
+
+    userDropdownList.addEventListener('click', function(e) {
+      const option = e.target.closest('.user-option');
+      if (option) {
+        const user = option.dataset.user;
+        const checkIcon = option.querySelector('.check-icon');
+        if (window.selectedUsers.has(user)) {
+          window.selectedUsers.delete(user);
+          checkIcon.style.color = '#ccc';
+        } else {
+          window.selectedUsers.add(user);
+          checkIcon.style.color = '#ee0000';
+        }
+        const textEl = document.getElementById('userDropdownText');
+        textEl.textContent = window.selectedUsers.size > 0 ? Array.from(window.selectedUsers).join(', ') : 'Select users...';
+      }
+    });
+
+    document.addEventListener('click', function(e) {
+      if (!userDropdown.contains(e.target)) {
+        userDropdownList.style.display = 'none';
+      }
+    });
+
+    function getFormData() {
+      let selectedOptions = [];
+      if (assignmentType.value === 'user') {
+        selectedOptions = Array.from(window.selectedUsers);
+      } else {
+        selectedOptions = [userOrGroup.value];
+      }
+      const data = {
+        projectName: document.getElementById('projectName').value,
+        assignmentType: assignmentType.value,
+        userOrGroupName: selectedOptions.join(', '),
+        userOrGroupNames: selectedOptions,
+        quota: {
+          cpuRequest: document.getElementById('cpuRequest').value || '1',
+          memoryRequest: document.getElementById('memoryRequest').value || '4Gi',
+          storageRequest: document.getElementById('storageRequest').value || '10Gi'
+        }
+      };
+      return data;
+    }
+
+    function showApprovalModal(data) {
+      projectSummary.innerHTML = `
+        <dt>Project Name:</dt><dd>${data.projectName}</dd>
+        <dt>Assignment Type:</dt><dd>${data.assignmentType}</dd>
+        <dt>Assigned To:</dt><dd>${data.userOrGroupName}</dd>
+        <dt>Role:</dt><dd>edit</dd>
+        <dt>Quota:</dt><dd>CPU: ${data.quota.cpuRequest}, Memory: ${data.quota.memoryRequest}, Storage: ${data.quota.storageRequest}</dd>
+      `;
+      modal.style.display = 'flex';
+    }
+
+    function hideModal() {
+      modal.style.display = 'none';
+    }
+
+    function createProject(data) {
+      message.className = 'info';
+      message.textContent = '⏳ Creating project...';
+      message.style.display = 'block';
+
+      setTimeout(() => {
+        message.className = 'info';
+        message.textContent = '⏳ Pipeline running: Creating project, quota...';
+        
+        setTimeout(() => {
+          message.className = 'success';
+          message.innerHTML = `✅ Project created successfully!\n\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `Project Name: ${data.projectName}\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+            `Role Assignment:\n` +
+            `  Type: ${data.assignmentType}\n` +
+            `  ${data.assignmentType === 'user' ? 'User' : 'Group'}: ${data.userOrGroupName}\n` +
+            `  Role: edit\n\n` +
+            `Quotas:\n` +
+            `  CPU: ${data.quota.cpuRequest}, Memory: ${data.quota.memoryRequest}, Storage: ${data.quota.storageRequest}`;
+          submitBtn.disabled = false;
+        }, 3000);
+      }, 1000);
+    }
+
+    document.getElementById('projectForm').addEventListener('submit', function(e) {
+      e.preventDefault();
+      message.style.display = 'none';
+      
+      if (assignmentType.value === 'user') {
+        if (window.selectedUsers.size === 0) {
+          message.className = 'error';
+          message.textContent = 'Please select at least one user';
+          message.style.display = 'block';
+          return;
+        }
+      } else if (!userOrGroup.value) {
+        message.className = 'error';
+        message.textContent = 'Please select a group';
+        message.style.display = 'block';
+        return;
+      }
+      
+      pendingData = getFormData();
+      showApprovalModal(pendingData);
+    });
+
+    document.getElementById('btnConfirm').addEventListener('click', function() {
+      hideModal();
+      if (pendingData) {
+        submitBtn.disabled = true;
+        createProject(pendingData);
+        pendingData = null;
+      }
+    });
+
+    document.getElementById('btnCancel').addEventListener('click', function() {
+      hideModal();
+      pendingData = null;
+    });
+
+    modal.addEventListener('click', function(e) {
+      if (e.target === modal) {
+        hideModal();
+        pendingData = null;
+      }
+    });
+  </script>
+</body>
+</html>
