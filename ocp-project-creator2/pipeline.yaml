@@ -1,0 +1,70 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: create-project-and-assign-role
+spec:
+  params:
+    - name: project-name
+      type: string
+    - name: assignment-type
+      type: string
+    - name: user-or-group-name
+      type: string
+    - name: user-or-group-names-json
+      type: string
+    - name: set-quota
+      type: string
+    - name: cpu-request
+      type: string
+    - name: memory-request
+      type: string
+    - name: storage-request
+      type: string
+    - name: role-name
+      type: string
+  tasks:
+    - name: create-project
+      taskRef:
+        name: create-openshift-project
+      params:
+        - name: project-name
+          value: $(params.project-name)
+
+    - name: create-quota
+      taskRef:
+        name: create-resource-quota
+      params:
+        - name: project-name
+          value: $(params.project-name)
+        - name: cpu-request
+          value: $(params.cpu-request)
+        - name: memory-request
+          value: $(params.memory-request)
+        - name: storage-request
+          value: $(params.storage-request)
+      runAfter:
+        - create-project
+
+    - name: create-network-policy
+      taskRef:
+        name: create-network-policy
+      params:
+        - name: project-name
+          value: $(params.project-name)
+      runAfter:
+        - create-project
+
+    - name: assign-role
+      taskRef:
+        name: assign-role-to-user
+      params:
+        - name: project-name
+          value: $(params.project-name)
+        - name: assignment-type
+          value: $(params.assignment-type)
+        - name: user-or-group-names-json
+          value: $(params.user-or-group-names-json)
+        - name: role-name
+          value: $(params.role-name)
+      runAfter:
+        - create-quota
