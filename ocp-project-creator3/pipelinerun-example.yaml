@@ -1,0 +1,18 @@
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  generateName: create-project-run-
+spec:
+  pipelineRef:
+    name: create-project-and-assign-role
+  params:
+    - name: project-name
+      value: "my-new-project"
+    - name: assignment-type
+      value: "user"
+    - name: user-or-group-name
+      value: "developer"
+  workspaces:
+    - name: oc-credentials
+      secret:
+        secretName: oc-credentials

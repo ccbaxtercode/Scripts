@@ -1,0 +1,123 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: create-openshift-project
+spec:
+  params:
+    - name: project-name
+      type: string
+  steps:
+    - name: create-project
+      image: quay.io/openshift/origin-cli:latest
+      command: ["/bin/bash"]
+      args:
+        - -c
+        - |
+          oc new-project $(params.project-name) || echo "Project already exists"
+
+---
+
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: create-resource-quota
+spec:
+  params:
+    - name: project-name
+      type: string
+    - name: cpu-request
+      type: string
+    - name: memory-request
+      type: string
+    - name: storage-request
+      type: string
+  steps:
+    - name: create-quota
+      image: quay.io/openshift/origin-cli:latest
+      command: ["/bin/bash"]
+      args:
+        - -c
+        - |
+          cat <<EOF | oc apply -f -
+          apiVersion: v1
+          kind: ResourceQuota
+          metadata:
+            name: project-quota
+            namespace: $(params.project-name)
+          spec:
+            hard:
+              requests.cpu: "$(params.cpu-request)"
+              requests.memory: "$(params.memory-request)"
+              requests.storage: "$(params.storage-request)"
+          EOF
+
+---
+
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: create-network-policy
+spec:
+  params:
+    - name: project-name
+      type: string
+  steps:
+    - name: create-network-policy
+      image: quay.io/openshift/origin-cli:latest
+      command: ["/bin/bash"]
+      args:
+        - -c
+        - |
+          cat <<EOF | oc apply -f -
+          apiVersion: networking.k8s.io/v1
+          kind: NetworkPolicy
+          metadata:
+            name: deny-all-ingress
+            namespace: $(params.project-name)
+          spec:
+            podSelector: {}
+            policyTypes:
+              - Ingress
+            ingress:
+              - from:
+                  - namespaceSelector:
+                      matchLabels:
+                        kubernetes.io/metadata.name: $(params.project-name)
+          EOF
+
+---
+
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: assign-role-to-user
+spec:
+  params:
+    - name: project-name
+      type: string
+    - name: assignment-type
+      type: string
+    - name: user-or-group-names-json
+      type: string
+    - name: role-name
+      type: string
+  steps:
+    - name: assign-role
+      image: quay.io/openshift/origin-cli:latest
+      command: ["/bin/bash"]
+      args:
+        - -c
+        - |
+          USER_OR_GROUP_NAMES=$(echo '$(params.user-or-group-names-json)' | tr -d '[]" ')
+          ROLE_NAME="$(params.role-name)"
+          
+          for name in $(echo "$USER_OR_GROUP_NAMES" | tr ',' '\n'); do
+            name=$(echo $name | tr -d ' ')
+            if [ -n "$name" ]; then
+              if [ "$(params.assignment-type)" == "user" ]; then
+                oc adm policy add-role-to-user "$ROLE_NAME" "$name" -n "$(params.project-name)"
+              else
+                oc adm policy add-role-to-group "$ROLE_NAME" "$name" -n "$(params.project-name)"
+              fi
+            fi
+          done
