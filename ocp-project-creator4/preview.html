@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Create OpenShift Project - Preview</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 600px;
+      margin: 30px auto;
+      padding: 20px;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      min-height: 100vh;
+    }
+    .container {
+      background: white;
+      padding: 35px;
+      border-radius: 16px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+    h1 { margin: 0 0 5px; color: #ee0000; font-size: 24px; }
+    .subtitle { color: #666; margin-bottom: 25px; font-size: 14px; }
+    h2 { margin: 25px 0 15px; padding-bottom: 8px; border-bottom: 2px solid #f0f0f0; color: #333; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+    h2::before { content: ''; width: 4px; height: 18px; background: #ee0000; border-radius: 2px; }
+    label { display: block; margin-top: 12px; font-weight: 500; color: #333; font-size: 14px; }
+    .hint { font-size: 12px; color: #888; margin-top: 3px; }
+    input, select { width: 100%; padding: 12px; margin-top: 5px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px; transition: border-color 0.3s; }
+    input:focus, select:focus { outline: none; border-color: #ee0000; }
+    .row { display: flex; gap: 15px; }
+    .col { flex: 1; }
+    #userDropdown, #groupDropdown { position: relative; }
+    .dropdown-btn { width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; background: white; cursor: pointer; display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
+    .dropdown-btn:hover { border-color: #ee0000; }
+    .dropdown-search { padding: 8px; border-bottom: 1px solid #eee; }
+    .dropdown-search input { margin-top: 0; border: 1px solid #ddd; }
+    .dropdown-list { display: none; position: absolute; top: 100%; left: 0; right: 0; background: white; border: 2px solid #e0e0e0; border-radius: 8px; margin-top: 4px; max-height: 200px; overflow-y: auto; z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    .dropdown-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; cursor: pointer; }
+    .dropdown-item:hover { background: #f5f5f5; }
+    .dropdown-item .check-icon { color: #ccc; font-weight: bold; }
+    .dropdown-item.selected .check-icon { color: #ee0000; }
+    button { width: 100%; padding: 16px; margin-top: 30px; background: linear-gradient(135deg, #ee0000 0%, #b30000 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600; transition: transform 0.2s, box-shadow 0.2s; }
+    button:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(238,0,0,0.3); }
+    button:disabled { background: #ccc; cursor: not-allowed; transform: none; box-shadow: none; }
+    #message { margin-top: 20px; padding: 15px; border-radius: 8px; display: none; white-space: pre-wrap; font-size: 13px; line-height: 1.6; }
+    .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+    .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+    .info { background: #cce5ff; color: #004085; border: 1px solid #b3d7ff; }
+    .console-link { display: block; margin-top: 10px; color: #ee0000; text-decoration: underline; }
+
+    .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 1000; justify-content: center; align-items: center; }
+    .modal { background: white; border-radius: 16px; max-width: 500px; width: 90%; max-height: 90vh; overflow-y: auto; box-shadow: 0 25px 80px rgba(0,0,0,0.4); }
+    .modal-header { padding: 20px 25px; border-bottom: 1px solid #eee; display: flex; align-items: center; gap: 12px; }
+    .modal-header h3 { margin: 0; color: #333; }
+    .modal-body { padding: 25px; }
+    .modal-body h4 { margin: 0 0 15px; color: #ee0000; font-size: 15px; }
+    .info-grid { display: grid; grid-template-columns: 140px 1fr; gap: 10px 15px; }
+    .info-grid dt { font-weight: 600; color: #555; }
+    .info-grid dd { margin: 0; color: #333; }
+    .modal-footer { padding: 15px 25px; border-top: 1px solid #eee; display: flex; gap: 12px; justify-content: flex-end; }
+    .btn-modal { padding: 12px 24px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+    .btn-cancel { background: #f0f0f0; color: #333; }
+    .btn-cancel:hover { background: #e0e0e0; }
+    .btn-confirm { background: #28a745; color: white; }
+    .btn-confirm:hover { background: #218838; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Create OpenShift Project</h1>
+    <p class="subtitle">Pipeline-triggered project creation</p>
+    <div style="text-align: center; margin: 20px 0;">
+      <img src="https://images.seeklogo.com/logo-png/34/1/red-hat-openshift-logo-png_seeklogo-347513.png" alt="OpenShift" width="100" style="margin-bottom: 10px;">
+    </div>
+
+    <form id="projectForm">
+      <h2>Project Details</h2>
+      <label for="projectName">Project Name</label>
+      <input type="text" id="projectName" required placeholder="my-new-project">
+
+      <h2>Role Assignment</h2>
+      <label for="assignmentType">Assignment Type</label>
+      <select id="assignmentType" required>
+        <option value="">Select type...</option>
+        <option value="user">User</option>
+        <option value="group">Group</option>
+      </select>
+
+      <div id="userDropdown" style="display: none;">
+        <label>Select Users</label>
+        <div class="dropdown-btn" id="userDropdownBtn">
+          <span id="userDropdownText">Select users...</span>
+          <span style="color: #888;">▼</span>
+        </div>
+        <div class="dropdown-list" id="userDropdownList">
+          <div class="dropdown-search">
+            <input type="text" id="userSearch" placeholder="Search users...">
+          </div>
+          <div id="userListContainer"></div>
+        </div>
+      </div>
+
+      <div id="groupDropdown" style="display: none;">
+        <label>Select Group</label>
+        <div class="dropdown-btn" id="groupDropdownBtn">
+          <span id="groupDropdownText">Select group...</span>
+          <span style="color: #888;">▼</span>
+        </div>
+        <div class="dropdown-list" id="groupDropdownList">
+          <div class="dropdown-search">
+            <input type="text" id="groupSearch" placeholder="Search groups...">
+          </div>
+          <div id="groupListContainer"></div>
+        </div>
+      </div>
+
+      <label for="roleSelect">Role</label>
+      <select id="roleSelect" required>
+        <option value="">Select role...</option>
+        <option value="ocp-edit">ocp-edit</option>
+        <option value="ocp-admin">ocp-admin</option>
+        <option value="ocp-view">ocp-view</option>
+      </select>
+
+      <h2>Resource Quotas</h2>
+      <div class="row">
+        <div class="col">
+          <label for="cpuRequest">CPU Request (cores)</label>
+          <input type="text" id="cpuRequest" value="2">
+          <div class="hint">e.g., 1, 2, 0.5</div>
+        </div>
+        <div class="col">
+          <label for="memoryRequest">Memory Request</label>
+          <input type="text" id="memoryRequest" value="4Gi">
+          <div class="hint">e.g., 4Gi, 512Mi</div>
+        </div>
+      </div>
+      <label for="storageRequest">Storage Request</label>
+      <input type="text" id="storageRequest" value="10Gi">
+      <div class="hint">e.g., 10Gi, 100Gi</div>
+
+      <button type="submit" id="submitBtn">Create Project</button>
+    </form>
+    
+    <div id="message"></div>
+  </div>
+
+  <div class="modal-overlay" id="approvalModal">
+    <div class="modal">
+      <div class="modal-header">
+        <span style="font-size: 24px;">📋</span>
+        <h3>Confirm Project Creation</h3>
+      </div>
+      <div class="modal-body">
+        <h4>Please review the project details:</h4>
+        <dl class="info-grid" id="projectSummary"></dl>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-modal btn-cancel" id="btnCancel">Cancel</button>
+        <button class="btn-modal btn-confirm" id="btnConfirm">Confirm & Create</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const mockUsers = ['admin', 'developer', 'test user', 'john doe', 'jane smith', 'devops team'];
+    const mockGroups = ['developers', 'admin group', 'qa team', 'devops', 'platform team'];
+
+    const assignmentType = document.getElementById('assignmentType');
+    const userDropdown = document.getElementById('userDropdown');
+    const groupDropdown = document.getElementById('groupDropdown');
+    const roleSelect = document.getElementById('roleSelect');
+    const message = document.getElementById('message');
+    const submitBtn = document.getElementById('submitBtn');
+    const modal = document.getElementById('approvalModal');
+    const projectSummary = document.getElementById('projectSummary');
+
+    let pendingData = null;
+    let allUsers = [...mockUsers];
+    let allGroups = [...mockGroups];
+    let selectedUsers = new Set();
+    let selectedGroup = '';
+
+    initDropdowns();
+
+    function initDropdowns() {
+      const userBtn = document.getElementById('userDropdownBtn');
+      const userList = document.getElementById('userDropdownList');
+      const userSearch = document.getElementById('userSearch');
+
+      userBtn.addEventListener('click', () => {
+        userList.style.display = userList.style.display === 'block' ? 'none' : 'block';
+      });
+
+      userSearch.addEventListener('input', (e) => {
+        renderUserList(e.target.value);
+      });
+
+      userList.addEventListener('click', (e) => {
+        const item = e.target.closest('.dropdown-item');
+        if (item) {
+          const user = item.dataset.value;
+          if (selectedUsers.has(user)) {
+            selectedUsers.delete(user);
+            item.classList.remove('selected');
+          } else {
+            selectedUsers.add(user);
+            item.classList.add('selected');
+          }
+          updateUserDropdownText();
+        }
+      });
+
+      const groupBtn = document.getElementById('groupDropdownBtn');
+      const groupList = document.getElementById('groupDropdownList');
+      const groupSearch = document.getElementById('groupSearch');
+
+      groupBtn.addEventListener('click', () => {
+        groupList.style.display = groupList.style.display === 'block' ? 'none' : 'block';
+      });
+
+      groupSearch.addEventListener('input', (e) => {
+        renderGroupList(e.target.value);
+      });
+
+      groupList.addEventListener('click', (e) => {
+        const item = e.target.closest('.dropdown-item');
+        if (item) {
+          selectedGroup = item.dataset.value;
+          renderGroupList('');
+          groupSearch.value = '';
+          document.getElementById('groupDropdownText').textContent = selectedGroup;
+          groupList.style.display = 'none';
+        }
+      });
+
+      document.addEventListener('click', (e) => {
+        if (!userDropdown.contains(e.target)) userList.style.display = 'none';
+        if (!groupDropdown.contains(e.target)) groupList.style.display = 'none';
+      });
+
+      renderUserList();
+      renderGroupList();
+    }
+
+    function renderUserList(filter = '') {
+      const container = document.getElementById('userListContainer');
+      container.innerHTML = '';
+      const filtered = allUsers.filter(u => u.toLowerCase().includes(filter.toLowerCase()));
+      filtered.forEach(user => {
+        container.innerHTML += `
+          <div class="dropdown-item ${selectedUsers.has(user) ? 'selected' : ''}" data-value="${user}">
+            <span>${user}</span>
+            <span class="check-icon">✓</span>
+          </div>
+        `;
+      });
+    }
+
+    function renderGroupList(filter = '') {
+      const container = document.getElementById('groupListContainer');
+      container.innerHTML = '';
+      const filtered = allGroups.filter(g => g.toLowerCase().includes(filter.toLowerCase()));
+      filtered.forEach(group => {
+        container.innerHTML += `
+          <div class="dropdown-item ${selectedGroup === group ? 'selected' : ''}" data-value="${group}">
+            <span>${group}</span>
+            <span class="check-icon">✓</span>
+          </div>
+        `;
+      });
+    }
+
+    function updateUserDropdownText() {
+      const text = document.getElementById('userDropdownText');
+      text.textContent = selectedUsers.size > 0 ? Array.from(selectedUsers).join(', ') : 'Select users...';
+    }
+
+    assignmentType.addEventListener('change', function() {
+      if (this.value === 'user') {
+        userDropdown.style.display = 'block';
+        groupDropdown.style.display = 'none';
+        selectedGroup = '';
+        selectedUsers = new Set();
+        updateUserDropdownText();
+        renderUserList();
+      } else if (this.value === 'group') {
+        userDropdown.style.display = 'none';
+        groupDropdown.style.display = 'block';
+        selectedUsers = new Set();
+        document.getElementById('userDropdownText').textContent = 'Select users...';
+        renderGroupList();
+      } else {
+        userDropdown.style.display = 'none';
+        groupDropdown.style.display = 'none';
+      }
+    });
+
+    function getFormData() {
+      const selectedOptions = assignmentType.value === 'user' 
+        ? Array.from(selectedUsers) 
+        : [selectedGroup];
+      
+      return {
+        projectName: document.getElementById('projectName').value,
+        assignmentType: assignmentType.value,
+        userOrGroupName: selectedOptions.join(', '),
+        userOrGroupNames: selectedOptions,
+        role: roleSelect.value,
+        quota: {
+          cpuRequest: document.getElementById('cpuRequest').value || '1',
+          memoryRequest: document.getElementById('memoryRequest').value || '4Gi',
+          storageRequest: document.getElementById('storageRequest').value || '10Gi'
+        }
+      };
+    }
+
+    function showApprovalModal(data) {
+      const typeLabel = data.assignmentType === 'user' ? 'User(s)' : 'Group';
+      projectSummary.innerHTML = `
+        <dt>Project Name:</dt><dd>${data.projectName}</dd>
+        <dt>Assignment Type:</dt><dd>${data.assignmentType}</dd>
+        <dt>${typeLabel}:</dt><dd>${data.userOrGroupName}</dd>
+        <dt>Role:</dt><dd>${data.role}</dd>
+        <dt>Quota:</dt><dd>CPU: ${data.quota.cpuRequest}, Memory: ${data.quota.memoryRequest}, Storage: ${data.quota.storageRequest}</dd>
+      `;
+      modal.style.display = 'flex';
+    }
+
+    function hideModal() { modal.style.display = 'none'; }
+
+    function mockCreateProject(data) {
+      message.className = 'info';
+      message.textContent = '⏳ Creating project...';
+      message.style.display = 'block';
+
+      setTimeout(() => {
+        message.className = 'info';
+        message.textContent = '⏳ Pipeline running: Creating project, quota, network policy...';
+        
+        setTimeout(() => {
+          message.className = 'success';
+          message.innerHTML = `✅ Project created successfully!\n\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `Project Name: ${data.projectName}\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+            `Role Assignment:\n` +
+            `  Type: ${data.assignmentType}\n` +
+            `  ${data.assignmentType === 'user' ? 'User(s)' : 'Group'}: ${data.userOrGroupName}\n` +
+            `  Role: ${data.role}\n\n` +
+            `Quotas:\n` +
+            `  CPU: ${data.quota.cpuRequest}\n` +
+            `  Memory: ${data.quota.memoryRequest}\n` +
+            `  Storage: ${data.quota.storageRequest}`;
+          submitBtn.disabled = false;
+        }, 3000);
+      }, 1000);
+    }
+
+    document.getElementById('projectForm').addEventListener('submit', function(e) {
+      e.preventDefault();
+      message.style.display = 'none';
+      
+      if (assignmentType.value === 'user' && selectedUsers.size === 0) {
+        message.className = 'error';
+        message.textContent = 'Please select at least one user';
+        message.style.display = 'block';
+        return;
+      } else if (assignmentType.value === 'group' && !selectedGroup) {
+        message.className = 'error';
+        message.textContent = 'Please select a group';
+        message.style.display = 'block';
+        return;
+      } else if (!roleSelect.value) {
+        message.className = 'error';
+        message.textContent = 'Please select a role';
+        message.style.display = 'block';
+        return;
+      }
+      
+      pendingData = getFormData();
+      showApprovalModal(pendingData);
+    });
+
+    document.getElementById('btnConfirm').addEventListener('click', function() {
+      hideModal();
+      if (pendingData) {
+        submitBtn.disabled = true;
+        mockCreateProject(pendingData);
+        pendingData = null;
+      }
+    });
+
+    document.getElementById('btnCancel').addEventListener('click', function() {
+      hideModal();
+      pendingData = null;
+    });
+
+    modal.addEventListener('click', function(e) {
+      if (e.target === modal) { hideModal(); pendingData = null; }
+    });
+  </script>
+</body>
+</html>
