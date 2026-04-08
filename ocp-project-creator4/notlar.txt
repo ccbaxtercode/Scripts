@@ -1,0 +1,15 @@
+# deepseek
+function getRoles() {
+  try {
+    const rolesOutput = execSync(
+      `oc get clusterrole -o json | jq -r '.items[] | select(.metadata.name | startswith("ocp-")) | .metadata.name' 2>/dev/null || echo ''`,
+      { encoding: 'utf8' }
+    );
+    const roles = rolesOutput.trim().split('\n').filter(Boolean);
+    return roles;
+  } catch (error) {
+    console.error('Error getting roles:', error.message);
+    return [];
+  }
+}
+
