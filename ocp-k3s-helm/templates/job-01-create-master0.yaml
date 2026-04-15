@@ -1,0 +1,263 @@
+# ============================================================================
+# Job 1: Create Master-0 VM
+# First step in sequential K3s cluster deployment
+# 
+# Responsibilities:
+#   1. Create Master-0 VirtualMachine with cloud-init (dual network)
+#   2. Wait for VMI to start
+#   3. Wait for K3s server to be ready
+#   4. Read Master-0 UDN IP and update other master cloud-init secrets
+# ============================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-01-create-master0
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "k3s.labels" . | nindent 4 }}
+    app.kubernetes.io/component: deployment
+    deployment-step: "01"
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "k3s.labels" . | nindent 8 }}
+        app.kubernetes.io/component: deployment
+        deployment-step: "01"
+    spec:
+      serviceAccountName: {{ .Release.Name }}-k3s-deployer
+      restartPolicy: OnFailure
+      containers:
+        - name: create-master0
+          image: quay.io/openshift/origin-cli:latest
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              echo "============================================"
+              echo "Job 1: Creating Master-0 VM"
+              echo "============================================"
+              
+              # Create Master-0 VirtualMachine with dual network
+              cat <<EOF | oc apply -f -
+              apiVersion: kubevirt.io/v1
+              kind: VirtualMachine
+              metadata:
+                name: {{ .Release.Name }}-master-0
+                namespace: {{ .Release.Namespace }}
+                labels:
+                  {{- include "k3s.masterSelectorLabels" . | nindent 18 }}
+                  vm-index: "0"
+              spec:
+                running: true
+                template:
+                  metadata:
+                    labels:
+                      {{- include "k3s.masterSelectorLabels" . | nindent 22 }}
+                      vm-index: "0"
+                      kubevirt.io/domain: {{ .Release.Name }}-master-0
+                  spec:
+                    domain:
+                      cpu:
+                        cores: {{ .Values.vmResources.cpu }}
+                      memory:
+                        guest: {{ .Values.vmResources.memory }}
+                      devices:
+                        disks:
+                          - name: containerdisk
+                            disk:
+                              bus: virtio
+                          - name: cloudinitdisk
+                            disk:
+                              bus: virtio
+                          - name: datadisk
+                            disk:
+                              bus: virtio
+                        interfaces:
+                          - name: default
+                            masquerade: {}
+                          - name: udn
+                            bridge: {}
+                      resources:
+                        requests:
+                          memory: {{ .Values.vmResources.memory }}
+                    networks:
+                      - name: default
+                        pod: {}
+                      - name: udn
+                        multus:
+                          networkName: {{ .Release.Name }}-udn
+                    volumes:
+                      - name: containerdisk
+                        containerDisk:
+                          image: {{ .Values.ubuntuImage }}
+                      - name: cloudinitdisk
+                        cloudInitNoCloud:
+                          userDataSecretRef:
+                            name: {{ .Release.Name }}-master-0-cloudinit
+                      - name: datadisk
+                        persistentVolumeClaim:
+                          claimName: {{ .Release.Name }}-master-0-disk
+              EOF
+              
+              echo "Master-0 VM created with dual network. Waiting for VMI to start..."
+              
+              # Wait for VMI to exist and be ready
+              MAX_WAIT=300
+              ELAPSED=0
+              while [ $ELAPSED -lt $MAX_WAIT ]; do
+                if oc get vmi {{ .Release.Name }}-master-0 -n {{ .Release.Namespace }} &>/dev/null; then
+                  VMI_PHASE=$(oc get vmi {{ .Release.Name }}-master-0 -n {{ .Release.Namespace }} -o jsonpath='{.status.phase}')
+                  if [ "$VMI_PHASE" = "Running" ]; then
+                    echo "VMI is running!"
+                    break
+                  fi
+                  echo "VMI phase: $VMI_PHASE (waiting...)"
+                fi
+                sleep 5
+                ELAPSED=$((ELAPSED + 5))
+              done
+              
+              if [ $ELAPSED -ge $MAX_WAIT ]; then
+                echo "ERROR: VMI failed to start within $MAX_WAIT seconds"
+                exit 1
+              fi
+              
+              echo "Waiting for K3s server to initialize (this may take 2-3 minutes)..."
+              sleep 90
+              
+              # Wait for K3s API to be accessible via UDN network
+              echo "Checking K3s API accessibility..."
+              MAX_RETRIES=60
+              RETRY=0
+              while [ $RETRY -lt $MAX_RETRIES ]; do
+                if curl -k -s --connect-timeout 5 https://{{ .Release.Name }}-master-0.{{ .Release.Namespace }}.svc.cluster.local:6443/ping &>/dev/null; then
+                  echo "K3s API is responding!"
+                  break
+                fi
+                echo "Attempt $((RETRY + 1))/$MAX_RETRIES - K3s API not ready yet..."
+                sleep 5
+                RETRY=$((RETRY + 1))
+              done
+              
+              if [ $RETRY -ge $MAX_RETRIES ]; then
+                echo "ERROR: K3s API failed to respond within expected time"
+                exit 1
+              fi
+              
+              # ========================================================================
+              # Read Master-0 UDN IP and update other master cloud-init secrets
+              # ========================================================================
+              {{- if gt (int .Values.masterCount) 1 }}
+              echo "============================================"
+              echo "Updating additional master cloud-init secrets..."
+              echo "============================================"
+              
+              # Read Master-0 UDN IP (second interface)
+              MASTER0_IP=$(oc get vmi {{ .Release.Name }}-master-0 -n {{ .Release.Namespace }} \
+                -o jsonpath='{.status.interfaces[1].ipAddress}')
+              
+              echo "Master-0 UDN IP: $MASTER0_IP"
+              
+              {{- range $i := until (int .Values.masterCount) }}
+              {{- if ne $i 0 }}
+              
+              # Update Master-{{ $i }} cloud-init secret
+              CLOUDINIT_SECRET="{{ $.Release.Name }}-master-{{ $i }}-cloudinit"
+              echo "Updating $CLOUDINIT_SECRET..."
+              
+              CURRENT_USERDATA=$(oc get secret $CLOUDINIT_SECRET -n {{ $.Release.Namespace }} \
+                -o jsonpath='{.data.userdata}' | base64 -d)
+              
+              UPDATED_USERDATA=$(echo "$CURRENT_USERDATA" | sed "s|\$master0_ip|$MASTER0_IP|g")
+              
+              oc patch secret $CLOUDINIT_SECRET -n {{ $.Release.Namespace }} \
+                --type merge \
+                -p "{\"stringData\":{\"userdata\":\"$UPDATED_USERDATA\"}}"
+              
+              echo "$CLOUDINIT_SECRET updated with Master-0 IP: $MASTER0_IP"
+              
+              {{- end }}
+              {{- end }}
+              
+              {{- end }}
+              
+              echo "============================================"
+              echo "Job 1 Complete: Master-0 is ready!"
+              echo "============================================"
+          env:
+            - name: HOME
+              value: /tmp
+---
+# ============================================================================
+# Cloud-init Secret for Master-0
+# Contains user-data for VM initialization
+# ============================================================================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Release.Name }}-master-0-cloudinit
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "k3s.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  userdata: |
+    #cloud-config
+    hostname: {{ .Release.Name }}-master-0
+    fqdn: {{ .Release.Name }}-master-0.{{ .Release.Namespace }}.svc.cluster.local
+    manage_etc_hosts: true
+    
+    users:
+      - name: {{ .Values.username }}
+        sudo: ALL=(ALL) NOPASSWD:ALL
+        groups: sudo
+        shell: /bin/bash
+        lock_passwd: false
+        passwd: {{ .Values.password | b64enc }}
+    
+    package_update: true
+    package_upgrade: false
+    
+    packages:
+      - curl
+      - wget
+      - vim
+      - net-tools
+      - iputils-ping
+    
+    runcmd:
+      - hostnamectl set-hostname {{ .Release.Name }}-master-0
+      
+      - until ping -c1 8.8.8.8 &>/dev/null; do echo "Waiting for network..."; sleep 2; done
+      
+      # Get UDN interface name (usually eth1)
+      - |
+        echo "Configuring UDN network..."
+        UDN_IFACE=""
+        for iface in $(ls /sys/class/net/ | grep -v lo); do
+          if [ "$iface" != "eth0" ] && [ "$iface" != "ens3" ] && [ "$iface" != "enp1s0" ]; then
+            UDN_IFACE=$iface
+            break
+          fi
+        done
+        echo "UDN interface: $UDN_IFACE"
+      
+      # Install K3s server with cluster-init on UDN interface
+      - |
+        echo "Installing K3s server (first master)..."
+        curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION={{ .Values.k3sVersion }} \
+          K3S_TOKEN=$(cat /run/secrets/kubernetes.io/serviceaccount/namespace)/token-placeholder \
+          sh -s - server \
+          --cluster-init \
+          --tls-san={{ include "k3s.serviceName" . }} \
+          --tls-san={{ include "k3s.serviceDNS" . }} \
+          --node-ip=$(ip -4 addr show $UDN_IFACE | grep -oP '(?<=inet\s)\d+(\.\d+){3}') \
+          --write-kubeconfig-mode=644
+      
+      - until kubectl get nodes &>/dev/null; do echo "Waiting for K3s..."; sleep 2; done
+      
+      - echo "Master-0 K3s installation complete on UDN!"

@@ -1,0 +1,282 @@
+# ============================================================================
+# Job 3: Create Worker VMs
+# Third step in sequential K3s cluster deployment
+# 
+# Dependencies:
+#   - Job 1 must complete (Master-0 ready)
+#   - Job 2 must complete if masterCount > 1 (All masters ready)
+# 
+# Responsibilities:
+#   1. Wait for previous jobs to complete
+#   2. Create all Worker VMs with cloud-init (dual network)
+#   3. VMs will join cluster as agents via UDN
+# ============================================================================
+{{- if gt (int .Values.workerCount) 0 }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-03-create-workers
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "k3s.labels" . | nindent 4 }}
+    app.kubernetes.io/component: deployment
+    deployment-step: "03"
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "k3s.labels" . | nindent 8 }}
+        app.kubernetes.io/component: deployment
+        deployment-step: "03"
+    spec:
+      serviceAccountName: {{ .Release.Name }}-k3s-deployer
+      restartPolicy: OnFailure
+      
+      initContainers:
+        - name: wait-for-masters
+          image: quay.io/openshift/origin-cli:latest
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              echo "Waiting for all master nodes to be ready..."
+              
+              echo "Checking Job-1 (Master-0)..."
+              while true; do
+                JOB_STATUS=$(oc get job {{ .Release.Name }}-01-create-master0 -n {{ .Release.Namespace }} -o jsonpath='{.status.succeeded}')
+                if [ "$JOB_STATUS" = "1" ]; then
+                  echo "Job-1 completed!"
+                  break
+                fi
+                
+                JOB_FAILED=$(oc get job {{ .Release.Name }}-01-create-master0 -n {{ .Release.Namespace }} -o jsonpath='{.status.failed}')
+                if [ ! -z "$JOB_FAILED" ] && [ "$JOB_FAILED" != "0" ]; then
+                  echo "ERROR: Job-1 failed!"
+                  exit 1
+                fi
+                
+                echo "Waiting for Job-1..."
+                sleep 5
+              done
+              
+              {{- if gt (int .Values.masterCount) 1 }}
+              echo "Checking Job-2 (Additional masters)..."
+              while true; do
+                JOB_STATUS=$(oc get job {{ .Release.Name }}-02-create-masters -n {{ .Release.Namespace }} -o jsonpath='{.status.succeeded}')
+                if [ "$JOB_STATUS" = "1" ]; then
+                  echo "Job-2 completed!"
+                  break
+                fi
+                
+                JOB_FAILED=$(oc get job {{ .Release.Name }}-02-create-masters -n {{ .Release.Namespace }} -o jsonpath='{.status.failed}')
+                if [ ! -z "$JOB_FAILED" ] && [ "$JOB_FAILED" != "0" ]; then
+                  echo "ERROR: Job-2 failed!"
+                  exit 1
+                fi
+                
+                echo "Waiting for Job-2..."
+                sleep 5
+              done
+              {{- end }}
+              
+              echo "All masters are ready. Proceeding with worker creation..."
+          env:
+            - name: HOME
+              value: /tmp
+        - name: create-workers
+          image: quay.io/openshift/origin-cli:latest
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              echo "============================================"
+              echo "Job 3: Creating Worker VMs"
+              echo "Worker Count: {{ .Values.workerCount }}"
+              echo "============================================"
+              
+              {{- range $i := until (int .Values.workerCount) }}
+              
+              echo "Creating Worker-{{ $i }}..."
+              cat <<EOF | oc apply -f -
+              apiVersion: kubevirt.io/v1
+              kind: VirtualMachine
+              metadata:
+                name: {{ $.Release.Name }}-worker-{{ $i }}
+                namespace: {{ $.Release.Namespace }}
+                labels:
+                  {{- include "k3s.workerSelectorLabels" $ | nindent 18 }}
+                  vm-index: "{{ $i }}"
+              spec:
+                running: true
+                template:
+                  metadata:
+                    labels:
+                      {{- include "k3s.workerSelectorLabels" $ | nindent 22 }}
+                      vm-index: "{{ $i }}"
+                      kubevirt.io/domain: {{ $.Release.Name }}-worker-{{ $i }}
+                  spec:
+                    domain:
+                      cpu:
+                        cores: {{ $.Values.vmResources.cpu }}
+                      memory:
+                        guest: {{ $.Values.vmResources.memory }}
+                      devices:
+                        disks:
+                          - name: containerdisk
+                            disk:
+                              bus: virtio
+                          - name: cloudinitdisk
+                            disk:
+                              bus: virtio
+                          - name: datadisk
+                            disk:
+                              bus: virtio
+                        interfaces:
+                          - name: default
+                            masquerade: {}
+                          - name: udn
+                            bridge: {}
+                      resources:
+                        requests:
+                          memory: {{ $.Values.vmResources.memory }}
+                    networks:
+                      - name: default
+                        pod: {}
+                      - name: udn
+                        multus:
+                          networkName: {{ $.Release.Name }}-udn
+                    volumes:
+                      - name: containerdisk
+                        containerDisk:
+                          image: {{ $.Values.ubuntuImage }}
+                      - name: cloudinitdisk
+                        cloudInitNoCloud:
+                          userDataSecretRef:
+                            name: {{ $.Release.Name }}-worker-{{ $i }}-cloudinit
+                      - name: datadisk
+                        persistentVolumeClaim:
+                          claimName: {{ $.Release.Name }}-worker-{{ $i }}-disk
+              EOF
+              
+              {{- end }}
+              
+              echo "All worker VMs created. Waiting for VMIs to start..."
+              
+              {{- range $i := until (int .Values.workerCount) }}
+              
+              echo "Waiting for Worker-{{ $i }} VMI..."
+              MAX_WAIT=300
+              ELAPSED=0
+              while [ $ELAPSED -lt $MAX_WAIT ]; do
+                if oc get vmi {{ $.Release.Name }}-worker-{{ $i }} -n {{ $.Release.Namespace }} &>/dev/null; then
+                  VMI_PHASE=$(oc get vmi {{ $.Release.Name }}-worker-{{ $i }} -n {{ $.Release.Namespace }} -o jsonpath='{.status.phase}')
+                  if [ "$VMI_PHASE" = "Running" ]; then
+                    echo "Worker-{{ $i }} VMI is running!"
+                    break
+                  fi
+                  echo "Worker-{{ $i }} VMI phase: $VMI_PHASE"
+                fi
+                sleep 5
+                ELAPSED=$((ELAPSED + 5))
+              done
+              
+              if [ $ELAPSED -ge $MAX_WAIT ]; then
+                echo "ERROR: Worker-{{ $i }} VMI failed to start"
+                exit 1
+              fi
+              
+              {{- end }}
+              
+              echo "Waiting for K3s agent to install on workers (60 seconds)..."
+              sleep 60
+              
+              echo "============================================"
+              echo "Job 3 Complete: All worker VMs are ready!"
+              echo "============================================"
+          env:
+            - name: HOME
+              value: /tmp
+
+{{- range $i := until (int .Values.workerCount) }}
+---
+# ============================================================================
+# Cloud-init Secret for Worker-{{ $i }}
+# Worker nodes join cluster via UDN
+# ============================================================================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $.Release.Name }}-worker-{{ $i }}-cloudinit
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "k3s.labels" $ | nindent 4 }}
+type: Opaque
+stringData:
+  userdata: |
+    #cloud-config
+    hostname: {{ $.Release.Name }}-worker-{{ $i }}
+    fqdn: {{ $.Release.Name }}-worker-{{ $i }}.{{ $.Release.Namespace }}.svc.cluster.local
+    manage_etc_hosts: true
+    
+    users:
+      - name: {{ $.Values.username }}
+        sudo: ALL=(ALL) NOPASSWD:ALL
+        groups: sudo
+        shell: /bin/bash
+        lock_passwd: false
+        passwd: {{ $.Values.password | b64enc }}
+    
+    package_update: true
+    package_upgrade: false
+    
+    packages:
+      - curl
+      - wget
+      - vim
+      - net-tools
+      - iputils-ping
+    
+    runcmd:
+      - hostnamectl set-hostname {{ $.Release.Name }}-worker-{{ $i }}
+      
+      - until ping -c1 8.8.8.8 &>/dev/null; do echo "Waiting for network..."; sleep 2; done
+      
+      # Get UDN interface IP
+      - |
+        echo "Configuring UDN network..."
+        UDN_IFACE=""
+        for iface in $(ls /sys/class/net/ | grep -v lo); do
+          if [ "$iface" != "eth0" ] && [ "$iface" != "ens3" ] && [ "$iface" != "enp1s0" ]; then
+            UDN_IFACE=$iface
+            break
+          fi
+        done
+        echo "UDN interface: $UDN_IFACE"
+        MY_IP=$(ip -4 addr show $UDN_IFACE | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
+        echo "My UDN IP: $MY_IP"
+      
+      # Wait for K3s API to be available via Service
+      - |
+        echo "Waiting for K3s API to be available..."
+        until curl -k -s https://{{ include "k3s.serviceDNS" $ }}:6443/ping &>/dev/null; do
+          echo "K3s API not ready yet..."
+          sleep 5
+        done
+        echo "K3s API is ready!"
+      
+      # Install K3s agent (worker mode) via UDN
+      - |
+        echo "Installing K3s agent (worker mode) via UDN..."
+        curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION={{ $.Values.k3sVersion }} \
+          K3S_URL=https://{{ include "k3s.serviceDNS" $ }}:6443 \
+          K3S_TOKEN=$(cat /run/secrets/kubernetes.io/serviceaccount/namespace)/token-placeholder \
+          K3S_NODE_IP=$MY_IP \
+          sh -s - agent
+      
+      - echo "Worker-{{ $i }} K3s agent installation complete on UDN!"
+{{- end }}
+{{- end }}

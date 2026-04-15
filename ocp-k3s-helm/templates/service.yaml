@@ -1,0 +1,28 @@
+# ============================================================================
+# K3s API Service
+# Provides internal cluster access to K3s API server (port 6443)
+# Used by:
+#   - Workers to join the cluster
+#   - Additional masters to join the cluster
+#   - Jobs to check cluster health
+# Selector points to master VMs only
+# ============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "k3s.serviceName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "k3s.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  type: ClusterIP
+  ports:
+    - name: https
+      port: 6443
+      targetPort: 6443
+      protocol: TCP
+  # Only route traffic to master nodes
+  # Workers don't run K3s API server
+  selector:
+    {{- include "k3s.masterSelectorLabels" . | nindent 4 }}

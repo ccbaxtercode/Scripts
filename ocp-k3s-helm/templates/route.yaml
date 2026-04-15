@@ -1,0 +1,28 @@
+# ============================================================================
+# K3s API Route
+# Exposes K3s API server externally via OpenShift Route
+# Uses passthrough TLS - K3s handles its own certificates
+# External users can access the cluster via this route
+# ============================================================================
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ include "k3s.serviceName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "k3s.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  port:
+    targetPort: https
+  tls:
+    # Passthrough - K3s API server handles TLS termination
+    # Route only forwards encrypted traffic
+    termination: passthrough
+    # Redirect HTTP to HTTPS for security
+    insecureEdgeTerminationPolicy: Redirect
+  to:
+    kind: Service
+    name: {{ include "k3s.serviceName" . }}
+    weight: 100
+  wildcardPolicy: None

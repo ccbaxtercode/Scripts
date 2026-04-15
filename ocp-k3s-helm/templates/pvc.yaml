@@ -1,0 +1,50 @@
+# ============================================================================
+# Persistent Volume Claims for Master VMs
+# Each master VM gets its own dedicated PVC for persistent storage
+# ============================================================================
+{{- $storageClass := required "A valid .Values.storageClassName is required!" .Values.storageClassName -}}
+{{- range $i := until (int .Values.masterCount) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $.Release.Name }}-master-{{ $i }}-disk
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "k3s.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: master
+    vm-name: {{ $.Release.Name }}-master-{{ $i }}
+    vm-index: "{{ $i }}"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: {{ $storageClass }}
+  resources:
+    requests:
+      storage: {{ $.Values.vmResources.diskSize }}
+{{- end }}
+
+# ============================================================================
+# Persistent Volume Claims for Worker VMs
+# Each worker VM gets its own dedicated PVC for persistent storage
+# ============================================================================
+{{- range $i := until (int .Values.workerCount) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $.Release.Name }}-worker-{{ $i }}-disk
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "k3s.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: worker
+    vm-name: {{ $.Release.Name }}-worker-{{ $i }}
+    vm-index: "{{ $i }}"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: {{ $storageClass }}
+  resources:
+    requests:
+      storage: {{ $.Values.vmResources.diskSize }}
+{{- end }}

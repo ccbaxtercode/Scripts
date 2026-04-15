@@ -1,0 +1,157 @@
+╔══════════════════════════════════════════════════════════════════════╗
+║          K3s Cluster on OpenShift Virtualization Deployed!          ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+🎉 Your K3s cluster "{{ .Values.clusterName }}" is being deployed!
+
+📊 Cluster Configuration:
+   • Cluster Name: {{ .Values.clusterName }}
+   • Master Nodes: {{ .Values.masterCount }}
+   • Worker Nodes: {{ .Values.workerCount }}
+   • K3s Version: {{ .Values.k3sVersion }}
+   • Namespace: {{ .Release.Namespace }}
+   • Release Name: {{ .Release.Name }}
+
+👤 Admin User Credentials:
+   • Username: {{ .Values.username }}
+   • Password: {{ .Values.password }}
+   
+   ⚠️  IMPORTANT: Save these credentials! You'll need them to access VMs.
+
+🚀 Deployment Progress:
+
+   The deployment follows a sequential process:
+   
+   Step 1: Creating Master-0 VM and initializing K3s cluster...
+   {{- if gt (int .Values.masterCount) 1 }}
+   Step 2: Creating additional master VMs ({{ sub (int .Values.masterCount) 1 }} nodes)...
+   {{- end }}
+   {{- if gt (int .Values.workerCount) 0 }}
+   Step 3: Creating worker VMs ({{ .Values.workerCount }} nodes)...
+   {{- end }}
+   Step 4: Fetching kubeconfig file...
+   
+   Total estimated time: {{ if eq (int .Values.masterCount) 1 }}3-5{{ else }}5-8{{ end }} minutes
+
+📈 Monitor Deployment:
+
+   Watch all Jobs:
+   $ oc get jobs -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }} -w
+   
+   Watch VirtualMachines:
+   $ oc get vm -n {{ .Release.Namespace }} -w
+   
+   Watch VirtualMachineInstances:
+   $ oc get vmi -n {{ .Release.Namespace }} -w
+   
+   View everything together:
+   $ watch 'oc get job,vm,vmi -n {{ .Release.Namespace }}'
+
+🌐 K3s API Access:
+
+   After deployment completes, get the external URL:
+   $ oc get route {{ .Release.Name }}-k3s-api -n {{ .Release.Namespace }} -o jsonpath='{.spec.host}' && echo
+   
+   Or view full route details:
+   $ oc get route {{ .Release.Name }}-k3s-api -n {{ .Release.Namespace }}
+
+📥 Download Kubeconfig:
+
+   1. Wait for Job-4 to complete (may take 3-5 minutes after install):
+      $ oc wait --for=condition=complete job/{{ .Release.Name }}-04-fetch-kubeconfig \
+          -n {{ .Release.Namespace }} --timeout=600s
+   
+   2. Download the kubeconfig file:
+      $ oc get secret {{ .Release.Name }}-kubeconfig \
+          -n {{ .Release.Namespace }} \
+          -o jsonpath='{.data.kubeconfig}' | base64 -d > {{ .Values.clusterName }}-kubeconfig.yaml
+   
+   3. Use the kubeconfig:
+      $ export KUBECONFIG={{ .Values.clusterName }}-kubeconfig.yaml
+      $ kubectl get nodes
+      $ kubectl get pods -A
+
+🔌 Access Virtual Machines:
+
+   Connect to Master-0 console (requires virtctl):
+   $ virtctl console {{ .Release.Name }}-master-0 -n {{ .Release.Namespace }}
+   
+   SSH to Master-0 (requires virtctl):
+   $ virtctl ssh {{ .Values.username }}@{{ .Release.Name }}-master-0 -n {{ .Release.Namespace }}
+   
+   Login credentials:
+   Username: {{ .Values.username }}
+   Password: {{ .Values.password }}
+
+🔍 Verify Cluster Health:
+
+   After kubeconfig is downloaded:
+   
+   Check nodes:
+   $ kubectl get nodes
+   
+   Check system pods:
+   $ kubectl get pods -A
+   
+   Check K3s version:
+   $ kubectl version
+
+📋 View Job Logs:
+
+   Job 1 - Master-0 Creation:
+   $ oc logs job/{{ .Release.Name }}-01-create-master0 -n {{ .Release.Namespace }}
+   
+   {{- if gt (int .Values.masterCount) 1 }}
+   Job 2 - Additional Masters:
+   $ oc logs job/{{ .Release.Name }}-02-create-masters -n {{ .Release.Namespace }}
+   {{- end }}
+   
+   {{- if gt (int .Values.workerCount) 0 }}
+   Job 3 - Workers:
+   $ oc logs job/{{ .Release.Name }}-03-create-workers -n {{ .Release.Namespace }}
+   {{- end }}
+   
+   Job 4 - Kubeconfig Fetch:
+   $ oc logs job/{{ .Release.Name }}-04-fetch-kubeconfig -n {{ .Release.Namespace }}
+
+🆘 Troubleshooting:
+
+   If a Job fails:
+   1. Check job logs (commands above)
+   2. Check VM/VMI status: oc describe vm <vm-name>
+   3. Check PVC status: oc get pvc -n {{ .Release.Namespace }}
+   
+   If Master-0 fails to start:
+   $ oc get events -n {{ .Release.Namespace }} --sort-by='.lastTimestamp'
+   
+   To restart a failed job:
+   $ oc delete job {{ .Release.Name }}-XX-<job-name> -n {{ .Release.Namespace }}
+   $ helm upgrade {{ .Release.Name }} k3s-openshift-virt -n {{ .Release.Namespace }} --reuse-values
+
+🗑️  Uninstall:
+
+   Remove the entire K3s cluster:
+   $ helm uninstall {{ .Release.Name }} -n {{ .Release.Namespace }}
+   
+   This will delete:
+   - All Jobs
+   - All VirtualMachines
+   - Service and Route
+   - Secrets (credentials, token, kubeconfig)
+   
+   Note: PVCs are retained by default. To delete them:
+   $ oc delete pvc -l app.kubernetes.io/instance={{ .Release.Name }} -n {{ .Release.Namespace }}
+
+📚 Next Steps:
+
+   1. ✓ Wait for all Jobs to complete
+   2. ✓ Download kubeconfig
+   3. ✓ Verify cluster health
+   4. 🚀 Deploy your applications!
+
+For more information:
+   • K3s Documentation: https://docs.k3s.io
+   • OpenShift Virtualization: https://docs.openshift.com/container-platform/latest/virt/about-virt.html
+   • Helm Chart Repository: {{ .Chart.Home }}
+
+Happy Kubernetes clustering! 🎊

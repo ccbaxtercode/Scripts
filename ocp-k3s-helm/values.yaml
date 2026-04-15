@@ -1,0 +1,82 @@
+# ============================================================================
+# K3s Cluster Configuration
+# ============================================================================
+
+# Cluster name - used in VM names and labels
+clusterName: k3s-cluster
+
+# Number of master nodes (1, 3, or 5 for HA)
+masterCount: 3
+
+# Number of worker nodes
+workerCount: 2
+
+# ============================================================================
+# VM Admin User Configuration
+# ============================================================================
+
+# Local admin username (will have sudo access)
+username: k3sadmin
+
+# REQUIRED: Admin user password
+# This password will be used to login to VMs
+password: "k3sadmin"
+
+# ============================================================================
+# K3s Version
+# ============================================================================
+
+# K3s version to install
+k3sVersion: v1.28.5+k3s1
+
+# ============================================================================
+# VM Resources
+# ============================================================================
+
+vmResources:
+  # CPU cores per VM
+  cpu: 2
+  
+  # Memory per VM (e.g., 2Gi, 4Gi, 8Gi)
+  memory: 4Gi
+  
+  # Disk size per VM (e.g., 20Gi, 50Gi, 100Gi)
+  diskSize: 50Gi
+
+# ============================================================================
+# Storage Configuration
+# ============================================================================
+
+# REQUIRED: StorageClass name for VM persistent disks
+# Must be a valid StorageClass in your cluster
+storageClassName: ""
+
+# ============================================================================
+# VM Image
+# ============================================================================
+
+# Ubuntu 22.04 container disk image
+ubuntuImage: quay.io/containerdisks/ubuntu:22.04
+
+# ============================================================================
+# Network Configuration
+# ============================================================================
+
+# First network: Pod network (masquerade) - default, no config needed
+# Second network: UDN (User Defined Network) for K3s internal communication
+
+# User Defined Network Configuration
+udn:
+  # Network name
+  name: k3s-udn
+  
+  # Master interface for macvlan (physical interface on the host)
+  masterInterface: eth0
+  
+  # Subnet configuration
+  subnet: "192.168.100.0/24"
+  gateway: "192.168.100.1"
+  
+  # IP allocation range (whereabouts will assign IPs in this range)
+  rangeStart: "192.168.100.50"
+  rangeEnd: "192.168.100.200"

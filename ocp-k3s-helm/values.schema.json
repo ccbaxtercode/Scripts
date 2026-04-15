@@ -1,0 +1,79 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "required": [
+        "password",
+        "storageClassName"
+    ],
+    "properties": {
+        "clusterName": {
+            "type": "string",
+            "title": "Cluster Name",
+            "description": "Name of the K3s cluster",
+            "default": "k3s-cluster"
+        },
+        "masterCount": {
+            "type": "integer",
+            "title": "Master Node Count",
+            "description": "Number of master nodes (1, 3, or 5 for HA)",
+            "default": 1,
+            "minimum": 1,
+            "maximum": 5
+        },
+        "workerCount": {
+            "type": "integer",
+            "title": "Worker Node Count",
+            "description": "Number of worker nodes",
+            "default": 2,
+            "minimum": 0,
+            "maximum": 20
+        },
+        "username": {
+            "type": "string",
+            "title": "Admin Username",
+            "description": "Admin username for VM access",
+            "default": "k3sadmin"
+        },
+        "password": {
+            "type": "string",
+            "title": "Admin Password",
+            "description": "Admin password for VM access (required)",
+            "minLength": 5,
+            "default": "k3sadmin"
+        },
+        "k3sVersion": {
+            "type": "string",
+            "title": "K3s Version",
+            "description": "K3s version to install",
+            "default": "v1.28.5+k3s1"
+        },
+        "vmResources": {
+            "type": "object",
+            "title": "VM Resources",
+            "properties": {
+                "cpu": {
+                    "type": "integer",
+                    "title": "CPU Cores",
+                    "description": "CPU cores per VM",
+                    "default": 2,
+                    "minimum": 1,
+                    "maximum": 32
+                },
+                "memory": {
+                    "type": "string",
+                    "title": "Memory",
+                    "description": "Memory per VM (e.g., 2Gi, 4Gi, 8Gi)",
+                    "default": "4Gi",
+                    "pattern": "^[0-9]+(Gi|Mi)$"
+                },
+                "diskSize": {
+                    "type": "string",
+                    "title": "Disk Size",
+                    "description": "Disk size per VM (e.g., 20Gi, 50Gi)",
+                    "default": "20Gi",
+                    "pattern": "^[0-9]+(Gi|Ti)$"
+                }
+            }
+        }
+    }
+}

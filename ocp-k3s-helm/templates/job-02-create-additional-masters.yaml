@@ -1,0 +1,274 @@
+# ============================================================================
+# Job 2: Create Additional Master VMs
+# Second step in sequential K3s cluster deployment
+# Only runs if masterCount > 1
+# 
+# Dependencies:
+#   - Job 1 must complete successfully
+# 
+# Responsibilities:
+#   1. Wait for Job-1 completion
+#   2. Create Master-1, Master-2, ... VMs with cloud-init (dual network)
+#   3. VMs will join existing cluster via UDN IP
+#   4. Wait for all VMIs to start
+# ============================================================================
+{{- if gt (int .Values.masterCount) 1 }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-02-create-masters
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "k3s.labels" . | nindent 4 }}
+    app.kubernetes.io/component: deployment
+    deployment-step: "02"
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "k3s.labels" . | nindent 8 }}
+        app.kubernetes.io/component: deployment
+        deployment-step: "02"
+    spec:
+      serviceAccountName: {{ .Release.Name }}-k3s-deployer
+      restartPolicy: OnFailure
+      
+      initContainers:
+        - name: wait-for-master0
+          image: quay.io/openshift/origin-cli:latest
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              echo "Waiting for Job-1 (Master-0 creation) to complete..."
+              
+              while true; do
+                JOB_STATUS=$(oc get job {{ .Release.Name }}-01-create-master0 -n {{ .Release.Namespace }} -o jsonpath='{.status.succeeded}')
+                if [ "$JOB_STATUS" = "1" ]; then
+                  echo "Job-1 completed successfully!"
+                  break
+                fi
+                
+                JOB_FAILED=$(oc get job {{ .Release.Name }}-01-create-master0 -n {{ .Release.Namespace }} -o jsonpath='{.status.failed}')
+                if [ ! -z "$JOB_FAILED" ] && [ "$JOB_FAILED" != "0" ]; then
+                  echo "ERROR: Job-1 failed!"
+                  exit 1
+                fi
+                
+                echo "Job-1 still running... waiting..."
+                sleep 5
+              done
+              
+              echo "Master-0 is ready. Proceeding with additional masters..."
+          env:
+            - name: HOME
+              value: /tmp
+        - name: create-masters
+          image: quay.io/openshift/origin-cli:latest
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              echo "============================================"
+              echo "Job 2: Creating Additional Master VMs"
+              echo "Master Count: {{ .Values.masterCount }}"
+              echo "============================================"
+              
+              {{- range $i := until (int .Values.masterCount) }}
+              {{- if ne $i 0 }}
+              
+              echo "Creating Master-{{ $i }}..."
+              cat <<EOF | oc apply -f -
+              apiVersion: kubevirt.io/v1
+              kind: VirtualMachine
+              metadata:
+                name: {{ $.Release.Name }}-master-{{ $i }}
+                namespace: {{ $.Release.Namespace }}
+                labels:
+                  {{- include "k3s.masterSelectorLabels" $ | nindent 18 }}
+                  vm-index: "{{ $i }}"
+              spec:
+                running: true
+                template:
+                  metadata:
+                    labels:
+                      {{- include "k3s.masterSelectorLabels" $ | nindent 22 }}
+                      vm-index: "{{ $i }}"
+                      kubevirt.io/domain: {{ $.Release.Name }}-master-{{ $i }}
+                  spec:
+                    domain:
+                      cpu:
+                        cores: {{ $.Values.vmResources.cpu }}
+                      memory:
+                        guest: {{ $.Values.vmResources.memory }}
+                      devices:
+                        disks:
+                          - name: containerdisk
+                            disk:
+                              bus: virtio
+                          - name: cloudinitdisk
+                            disk:
+                              bus: virtio
+                          - name: datadisk
+                            disk:
+                              bus: virtio
+                        interfaces:
+                          - name: default
+                            masquerade: {}
+                          - name: udn
+                            bridge: {}
+                      resources:
+                        requests:
+                          memory: {{ $.Values.vmResources.memory }}
+                    networks:
+                      - name: default
+                        pod: {}
+                      - name: udn
+                        multus:
+                          networkName: {{ $.Release.Name }}-udn
+                    volumes:
+                      - name: containerdisk
+                        containerDisk:
+                          image: {{ $.Values.ubuntuImage }}
+                      - name: cloudinitdisk
+                        cloudInitNoCloud:
+                          userDataSecretRef:
+                            name: {{ $.Release.Name }}-master-{{ $i }}-cloudinit
+                      - name: datadisk
+                        persistentVolumeClaim:
+                          claimName: {{ $.Release.Name }}-master-{{ $i }}-disk
+              EOF
+              
+              {{- end }}
+              {{- end }}
+              
+              echo "All master VMs created. Waiting for VMIs to start..."
+              
+              {{- range $i := until (int .Values.masterCount) }}
+              {{- if ne $i 0 }}
+              
+              echo "Waiting for Master-{{ $i }} VMI..."
+              MAX_WAIT=300
+              ELAPSED=0
+              while [ $ELAPSED -lt $MAX_WAIT ]; do
+                if oc get vmi {{ $.Release.Name }}-master-{{ $i }} -n {{ $.Release.Namespace }} &>/dev/null; then
+                  VMI_PHASE=$(oc get vmi {{ $.Release.Name }}-master-{{ $i }} -n {{ $.Release.Namespace }} -o jsonpath='{.status.phase}')
+                  if [ "$VMI_PHASE" = "Running" ]; then
+                    echo "Master-{{ $i }} VMI is running!"
+                    break
+                  fi
+                  echo "Master-{{ $i }} VMI phase: $VMI_PHASE"
+                fi
+                sleep 5
+                ELAPSED=$((ELAPSED + 5))
+              done
+              
+              if [ $ELAPSED -ge $MAX_WAIT ]; then
+                echo "ERROR: Master-{{ $i }} VMI failed to start"
+                exit 1
+              fi
+              
+              {{- end }}
+              {{- end }}
+              
+              echo "Waiting for K3s to install on additional masters (90 seconds)..."
+              sleep 90
+              
+              echo "============================================"
+              echo "Job 2 Complete: All master VMs are ready!"
+              echo "============================================"
+          env:
+            - name: HOME
+              value: /tmp
+
+{{- range $i := until (int .Values.masterCount) }}
+{{- if ne $i 0 }}
+---
+# ============================================================================
+# Cloud-init Secret for Master-{{ $i }}
+# Additional master nodes join existing cluster via UDN IP
+# NOTE: $master0_ip will be replaced by Job-1 after Master-0 is ready
+# ============================================================================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $.Release.Name }}-master-{{ $i }}-cloudinit
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "k3s.labels" $ | nindent 4 }}
+type: Opaque
+stringData:
+  userdata: |
+    #cloud-config
+    hostname: {{ $.Release.Name }}-master-{{ $i }}
+    fqdn: {{ $.Release.Name }}-master-{{ $i }}.{{ $.Release.Namespace }}.svc.cluster.local
+    manage_etc_hosts: true
+    
+    users:
+      - name: {{ $.Values.username }}
+        sudo: ALL=(ALL) NOPASSWD:ALL
+        groups: sudo
+        shell: /bin/bash
+        lock_passwd: false
+        passwd: {{ $.Values.password | b64enc }}
+    
+    package_update: true
+    package_upgrade: false
+    
+    packages:
+      - curl
+      - wget
+      - vim
+      - net-tools
+      - iputils-ping
+    
+    runcmd:
+      - hostnamectl set-hostname {{ $.Release.Name }}-master-{{ $i }}
+      
+      - until ping -c1 8.8.8.8 &>/dev/null; do echo "Waiting for network..."; sleep 2; done
+      
+      # Get UDN interface IP
+      - |
+        echo "Configuring UDN network..."
+        UDN_IFACE=""
+        for iface in $(ls /sys/class/net/ | grep -v lo); do
+          if [ "$iface" != "eth0" ] && [ "$iface" != "ens3" ] && [ "$iface" != "enp1s0" ]; then
+            UDN_IFACE=$iface
+            break
+          fi
+        done
+        echo "UDN interface: $UDN_IFACE"
+        MY_IP=$(ip -4 addr show $UDN_IFACE | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
+        echo "My UDN IP: $MY_IP"
+      
+      # Wait for Master-0 to be available via UDN
+      - |
+        echo "Waiting for Master-0 to be available on UDN..."
+        until curl -k -s --connect-timeout 5 https://$master0_ip:6443/ping &>/dev/null; do
+          echo "Master-0 not ready yet..."
+          sleep 5
+        done
+        echo "Master-0 is ready on UDN!"
+      
+      # Join existing K3s cluster as additional master via UDN
+      - |
+        echo "Joining K3s cluster as additional master via UDN..."
+        curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION={{ $.Values.k3sVersion }} \
+          K3S_TOKEN=$(cat /run/secrets/kubernetes.io/serviceaccount/namespace)/token-placeholder \
+          sh -s - server \
+          --server https://$master0_ip:6443 \
+          --node-ip=$MY_IP \
+          --tls-san={{ include "k3s.serviceName" $ }} \
+          --tls-san={{ include "k3s.serviceDNS" $ }} \
+          --write-kubeconfig-mode=644
+      
+      - until kubectl get nodes &>/dev/null; do echo "Waiting for K3s..."; sleep 2; done
+      
+      - echo "Master-{{ $i }} K3s installation complete on UDN!"
+{{- end }}
+{{- end }}
+{{- end }}
