@@ -1,0 +1,1344 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create OpenShift Project</title>
+
+    <style>
+        :root {
+            --cream: #FFF6E6;
+            --cream-2: #FFEFD1;
+            --butter: #FFD86B;
+            --butter-deep: #F5B73D;
+            --mint: #A8E5C8;
+            --mint-deep: #5FCFA0;
+            --ink: #3B2A1F;
+            --ink-2: #6B4F3F;
+            --line: #2B1E16;
+            --paper: #FFFAF0;
+            --stroke: 3px;
+            --r-sm: 14px;
+            --r-md: 22px;
+        }
+
+        body {
+            font-family: 'Nunito', system-ui, sans-serif;
+            background: var(--cream);
+            color: var(--ink);
+            padding: 40px;
+            margin:0;
+        }
+
+        .card {
+            max-width: 520px;
+            margin: auto;
+            background: var(--paper);
+            border: var(--stroke) solid var(--line);
+            border-radius: var(--r-md);
+            padding: 28px;
+            box-shadow: 0 6px 0 var(--line), 0 14px 28px rgba(43, 30, 22, 0.18);
+        }
+
+        .logo-container {
+            text-align: center;
+            margin-bottom: 16px;
+        }
+
+        .logo-container svg {
+            height: 80px;
+        }
+
+        h2 {
+            text-align: center;
+            margin: 0 0 4px;
+            color: var(--ink);
+            font-size: 22px;
+            font-weight: 800;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: var(--ink-2);
+            font-size: 13px;
+            margin: 0 0 24px;
+        }
+
+        label {
+            display: block;
+            margin-top: 16px;
+            font-weight: 700;
+            font-size: 14px;
+            color: var(--ink);
+        }
+
+        .hint {
+            font-size: 11px;
+            color: var(--ink-2);
+            margin-top: 4px;
+        }
+
+        input {
+            width: 100%;
+            padding: 10px 12px;
+            margin-top: 6px;
+            border: var(--stroke) solid var(--line);
+            border-radius: var(--r-sm);
+            font-size: 14px;
+            background: var(--cream);
+            color: var(--ink);
+            font-family: inherit;
+            box-sizing: border-box;
+        }
+
+        .input-with-icon {
+            position: relative;
+            margin-top: 6px;
+        }
+
+        .input-with-icon input {
+            margin-top: 0;
+            padding-right: 40px;
+        }
+
+        .input-status-icon {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 20px;
+            display: none;
+            pointer-events: none;
+            transition: opacity 0.2s;
+        }
+
+        .input-status-icon.show {
+            display: block;
+            animation: popIn 0.3s cubic-bezier(0.5, 1.6, 0.4, 1);
+        }
+
+        @keyframes popIn {
+            0% { transform: translateY(-50%) scale(0); opacity: 0; }
+            100% { transform: translateY(-50%) scale(1); opacity: 1; }
+        }
+
+        .name-status-modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(43, 30, 22, 0.6);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .name-status-modal .modal {
+            max-width: 380px;
+        }
+
+        .name-status-modal .modal-body {
+            text-align: center;
+        }
+
+        .name-status-modal .status-icon {
+            font-size: 40px;
+            margin-bottom: 12px;
+        }
+
+        .name-status-modal .status-message {
+            font-weight: 700;
+            font-size: 15px;
+            color: var(--ink);
+            margin: 0;
+        }
+
+        .name-status-modal .modal-footer {
+            justify-content: center;
+        }
+
+        .dropdown {
+            position: relative;
+            margin-top: 6px;
+            width: 100%;
+        }
+
+        .dropdown-btn {
+            width: 100%;
+            padding: 10px 12px;
+            border: var(--stroke) solid var(--line);
+            border-radius: var(--r-sm);
+            background: var(--cream);
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 14px;
+            color: var(--ink);
+            font-family: inherit;
+            box-sizing: border-box;
+        }
+
+        .dropdown-btn:hover {
+            background: var(--cream);
+        }
+
+        .dropdown-list {
+            display: none;
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            right: 0;
+            background: var(--cream-2);
+            border: var(--stroke) solid var(--line);
+            border-radius: var(--r-sm);
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 100;
+            box-shadow: 0 4px 0 var(--line), 0 8px 16px rgba(43, 30, 22, 0.15);
+        }
+
+        .dropdown-search {
+            padding: 8px;
+            border-bottom: 2.5px solid var(--line);
+            background: var(--cream);
+        }
+
+        .dropdown-search input {
+            margin-top: 0;
+            border: 2px solid var(--line);
+            padding: 8px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .list-item {
+            padding: 10px 12px;
+            border-bottom: 2px solid rgba(43, 30, 22, 0.1);
+            cursor: pointer;
+            background: transparent;
+            transition: background 0.1s;
+            font-size: 14px;
+            color: var(--ink);
+        }
+
+        .list-item:hover {
+            background: var(--butter);
+        }
+
+        .list-item.selected {
+            background: var(--butter-deep);
+            font-weight: 700;
+        }
+
+        .check-icon {
+            float: right;
+            color: var(--ink-2);
+            font-weight: bold;
+        }
+
+        .selected .check-icon {
+            color: var(--ink);
+        }
+
+        .section {
+            margin-top: 24px;
+            padding-top: 16px;
+            border-top: 2.5px solid var(--line);
+        }
+
+        .section-title {
+            font-weight: 800;
+            margin-bottom: 12px;
+            color: var(--ink);
+            font-size: 15px;
+        }
+
+        .row {
+            display: flex;
+            gap: 12px;
+            margin-top: 6px;
+        }
+
+        .col {
+            flex: 1;
+            min-width: 0;
+        }
+
+        #submitBtn {
+            margin-top: 24px;
+            width: 100%;
+            padding: 14px;
+            border: var(--stroke) solid var(--line);
+            border-radius: var(--r-sm);
+            background: var(--mint);
+            font-weight: 800;
+            font-size: 16px;
+            cursor: pointer;
+            box-shadow: 0 5px 0 var(--line), 0 10px 18px rgba(43, 30, 22, 0.18);
+            color: var(--ink);
+            font-family: inherit;
+            transition: transform 0.12s cubic-bezier(0.5, 1.6, 0.4, 1), box-shadow 0.12s;
+            letter-spacing: 0.01em;
+            position: relative;
+        }
+
+        #submitBtn:hover {
+            transform: translateY(-2px) rotate(-0.5deg);
+        }
+
+        #submitBtn:active {
+            transform: translateY(3px);
+            box-shadow: 0 2px 0 var(--line), 0 4px 8px rgba(43, 30, 22, 0.2);
+        }
+
+        #submitBtn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        #submitBtn.processing {
+            cursor: not-allowed;
+            overflow: hidden;
+        }
+
+        #submitBtn.processing .btn-content {
+            position: relative;
+            z-index: 2;
+        }
+
+        .btn-progress {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(90deg, var(--mint) 0%, var(--mint-deep) 50%, var(--mint) 100%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite linear, progress-fill var(--progress-duration, 600s) linear forwards;
+            z-index: 1;
+            opacity: 0.7;
+        }
+
+        @keyframes shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        @keyframes progress-fill {
+            from { width: 0; }
+            to { width: 100%; }
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 18px;
+            height: 18px;
+            border: 2px solid rgba(59, 42, 31, 0.3);
+            border-top-color: var(--ink);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        #message {
+            margin-top: 16px;
+            padding: 12px;
+            border-radius: var(--r-sm);
+            display: none;
+            white-space: pre-wrap;
+            font-size: 13px;
+            border: 2.5px solid var(--line);
+            line-height: 1.6;
+        }
+
+        .success { background: var(--mint); }
+        .error { background: #FFB3C0; }
+        .info { background: #A6D8FF; }
+
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(43, 30, 22, 0.6);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal {
+            background: var(--paper);
+            border: var(--stroke) solid var(--line);
+            border-radius: var(--r-md);
+            max-width: 500px;
+            width: 90%;
+            box-shadow: 0 6px 0 var(--line), 0 14px 28px rgba(43, 30, 22, 0.18);
+        }
+
+        .modal-header {
+            padding: 16px 24px;
+            border-bottom: 2.5px solid var(--line);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .modal-header h3 {
+            margin: 0;
+            color: var(--ink);
+            font-weight: 800;
+        }
+
+        .modal-body {
+            padding: 24px;
+        }
+
+        .modal-body p {
+            margin: 0 0 16px;
+            font-weight: 700;
+            color: var(--ink);
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: 120px 1fr;
+            gap: 8px;
+        }
+
+        .info-grid dt {
+            font-weight: 700;
+            color: var(--ink);
+        }
+
+        .info-grid dd {
+            margin: 0;
+            color: var(--ink-2);
+        }
+
+        .modal-footer {
+            padding: 16px 24px;
+            border-top: 2.5px solid var(--line);
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+
+        .btn-modal {
+            padding: 10px 20px;
+            border: var(--stroke) solid var(--line);
+            border-radius: var(--r-sm);
+            font-weight: 700;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 14px;
+            transition: transform 0.12s;
+        }
+
+        .btn-modal:hover {
+            transform: translateY(-1px);
+        }
+
+        .btn-cancel {
+            background: var(--cream);
+        }
+
+        .btn-confirm {
+            background: var(--mint);
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="card">
+        <div class="logo-container">
+            <svg xmlns='http://www.w3.org/2000/svg' height='80' viewBox='-8.66934 -15.485125 75.13428 92.91075'>
+                <path d='M54.2278 11.9866c-.5725-1.1825-1.235-2.3237-2.0037-3.4l-8.2125 2.9888c.955.9775 1.7575 2.0762 2.4137 3.2512zM17.925 21.07L9.71 24.0587c.105 1.3175.3325 2.6188.6512 3.8938l7.8038-2.8413c-.2538-1.32-.3438-2.68-.24-4.0412' fill='#c22133'/>
+                <path d='M36.1562 9.6601c1.7087.7975 3.1888 1.885 4.4375 3.16l8.2125-2.9887c-2.275-3.1925-5.3738-5.86-9.17-7.6313-11.7413-5.475-25.7488-.3775-31.2225 11.3625-1.7725 3.7988-2.4313 7.8338-2.1213 11.7413l8.2138-2.9888c.1362-1.78.57-3.5637 1.3662-5.2737C19.43 9.4139 28.5287 6.1039 36.1562 9.66m8.7596 15.0082c-.1312 1.7788-.58 3.5625-1.3787 5.2738-3.5563 7.6287-12.6563 10.9387-20.2825 7.3825-1.7113-.7988-3.2025-1.8775-4.4463-3.155l-8.1962 2.9825c2.27 3.1925 5.365 5.8612 9.1637 7.6337 11.7413 5.4738 25.7463.3763 31.2213-11.365 1.7737-3.7962 2.4275-7.8312 2.115-11.735z' fill='#db212e'/>
+                <path d='M46.9355 14.6411l-7.8038 2.84c1.45 2.5975 2.135 5.5875 1.91 8.595l8.1962-2.9812a23.6651 23.6651 0 00-2.3025-8.4538m-36.0627 13.124l-7.8038 2.8425a23.758 23.758 0 003.67 7.955l8.195-2.9837c-2.1037-2.16-3.5025-4.8938-4.0612-7.8138' fill='#eb2126'/>
+                <path d='M53.0383 9.823c-.2587-.42-.5275-.8338-.8137-1.2363l-8.2125 2.9888c.3612.37.6937.7625 1.0112 1.165zM17.8936 22.7194a14.534 14.534 0 01.0312-1.6488l-8.215 2.9888c.0425.5262.1087 1.0487.1875 1.57l7.9962-2.91z' fill='#ad213b'/>
+                <path d='M53.1116 21.6856l-8.1963 2.9825c-.0863 1.18-.3162 2.3625-.6925 3.525l8.9213-3.2525a23.5564 23.5564 0 00-.0325-3.255M10.6128 37.1531a23.2688 23.2688 0 002.0888 2.5363l8.9225-3.2538c-1.0425-.6525-1.985-1.4137-2.8163-2.2662z' fill='#ba2133'/>
+            </svg>
+        </div>
+
+        <h2>Create OpenShift Project</h2>
+        <p class="subtitle">Pipeline-triggered project creation</p>
+
+        <form id="projectForm">
+            <label>Team Name</label>
+            <div class="dropdown" id="teamDropdown">
+                <div class="dropdown-btn" id="teamBtn">
+                    <span id="teamText">Select team...</span>
+                    <span style="color: var(--ink-2);">▼</span>
+                </div>
+                <div class="dropdown-list" id="teamList">
+                    <div class="list-item" data-value="dev">dev</div>
+                    <div class="list-item" data-value="test">test</div>
+                    <div class="list-item" data-value="prod">prod</div>
+                </div>
+            </div>
+            <input type="hidden" id="teamSelect" value="">
+            <div id="teamFeedback" class="hint"></div>
+
+            <label for="projectName" style="margin-top:16px;">Project Name</label>
+            <div class="input-with-icon">
+                <input type="text" id="projectName" required placeholder="Select a team first..." disabled>
+                <span class="input-status-icon" id="projectNameIcon"></span>
+            </div>
+            <div id="projectNameFeedback" class="hint"></div>
+
+            <div class="section">
+                <div class="section-title">Role Assignment</div>
+
+                <label>Assignment Type</label>
+                <div class="dropdown" id="assignmentTypeDropdown">
+                    <div class="dropdown-btn" id="assignmentTypeBtn">
+                        <span id="assignmentTypeText">Select type...</span>
+                        <span style="color: var(--ink-2);">▼</span>
+                    </div>
+                    <div class="dropdown-list" id="assignmentTypeList">
+                        <div class="list-item" data-value="user">User</div>
+                        <div class="list-item" data-value="group">Group</div>
+                    </div>
+                </div>
+                <input type="hidden" id="assignmentType" value="">
+
+                <div id="userDropdown" style="display: none;">
+                    <label>Select Users</label>
+                    <div class="dropdown" id="userDropdownContainer">
+                        <div class="dropdown-btn" id="userDropdownBtn">
+                            <span id="userDropdownText">Select users...</span>
+                            <span style="color: var(--ink-2);">▼</span>
+                        </div>
+                        <div class="dropdown-list" id="userDropdownList">
+                            <div class="dropdown-search">
+                                <input type="text" id="userSearch" placeholder="Search users...">
+                            </div>
+                            <div id="userListContainer"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="groupDropdown" style="display: none;">
+                    <label>Select Group</label>
+                    <div class="dropdown" id="groupDropdownContainer">
+                        <div class="dropdown-btn" id="groupDropdownBtn">
+                            <span id="groupDropdownText">Select group...</span>
+                            <span style="color: var(--ink-2);">▼</span>
+                        </div>
+                        <div class="dropdown-list" id="groupDropdownList">
+                            <div class="dropdown-search">
+                                <input type="text" id="groupSearch" placeholder="Search groups...">
+                            </div>
+                            <div id="groupListContainer"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <label>Role</label>
+                <div class="dropdown" id="roleDropdown">
+                    <div class="dropdown-btn" id="roleBtn">
+                        <span id="roleText">Select role...</span>
+                        <span style="color: var(--ink-2);">▼</span>
+                    </div>
+                    <div class="dropdown-list" id="roleList">
+                        <div class="list-item" data-value="">Loading roles...</div>
+                    </div>
+                </div>
+                <input type="hidden" id="roleSelect" value="">
+            </div>
+
+            <div class="section">
+                <div class="section-title">Resource Quotas</div>
+
+                <div class="row">
+                    <div class="col">
+                        <label for="cpuRequest">CPU Request</label>
+                        <input type="text" id="cpuRequest" value="2">
+                        <div class="hint">e.g., 1, 2, 0.5</div>
+                    </div>
+                    <div class="col">
+                        <label for="memoryRequest">Memory</label>
+                        <input type="text" id="memoryRequest" value="4Gi">
+                        <div class="hint">e.g., 4Gi, 512Mi</div>
+                    </div>
+                </div>
+
+                <label for="storageRequest" style="margin-top: 16px;">Storage</label>
+                <input type="text" id="storageRequest" value="10Gi">
+                <div class="hint">e.g., 10Gi, 100Gi</div>
+            </div>
+
+            <button type="submit" id="submitBtn">Create Project</button>
+        </form>
+
+        <div id="message"></div>
+    </div>
+
+    <div class="modal-overlay" id="approvalModal">
+        <div class="modal">
+            <div class="modal-header">
+                <span style="font-size: 20px;">📋</span>
+                <h3>Confirm Project Creation</h3>
+            </div>
+            <div class="modal-body">
+                <p>Please review the project details:</p>
+                <dl class="info-grid" id="projectSummary"></dl>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-modal btn-cancel" id="btnCancel">Cancel</button>
+                <button class="btn-modal btn-confirm" id="btnConfirm">Confirm & Create</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="name-status-modal" id="nameStatusModal">
+        <div class="modal">
+            <div class="modal-header">
+                <span style="font-size: 20px;" id="nameModalHeaderIcon">🔍</span>
+                <h3>Project Name Check</h3>
+            </div>
+            <div class="modal-body">
+                <div class="status-icon" id="nameModalIcon"></div>
+                <p class="status-message" id="nameModalMessage"></p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-modal btn-confirm" id="nameModalOkBtn">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const assignmentType = document.getElementById('assignmentType');
+        const roleSelect = document.getElementById('roleSelect');
+        const message = document.getElementById('message');
+        const submitBtn = document.getElementById('submitBtn');
+        const modal = document.getElementById('approvalModal');
+        const projectSummary = document.getElementById('projectSummary');
+
+        let pendingData = null;
+        let allUsers = [];
+        let allGroups = [];
+        let allRoles = [];
+        let selectedUsers = new Set();
+        let selectedGroup = '';
+        let selectedTeam = '';
+        let currentPrefix = '';
+        let projectNameValid = false;
+
+        function updateSubmitButtonState() {
+            const teamSelected = selectedTeam !== '';
+            const assignmentSelected = assignmentType.value !== '';
+            const roleSelected = roleSelect.value !== '';
+
+            let usersOrGroupSelected = false;
+            if (assignmentType.value === 'user') {
+                usersOrGroupSelected = selectedUsers.size > 0;
+            } else if (assignmentType.value === 'group') {
+                usersOrGroupSelected = selectedGroup !== '';
+            }
+
+            const projectNameFilled = projectNameInput.value.trim().length > 0;
+            const allValid = teamSelected && assignmentSelected && roleSelected && usersOrGroupSelected && projectNameValid && projectNameFilled;
+
+            submitBtn.disabled = !allValid;
+        }
+
+        // Fetch users, groups, and roles from API
+        fetch('/api/users-groups')
+          .then(res => res.json())
+          .then(data => {
+            allUsers = data.users || [];
+            allGroups = data.groups || [];
+            allRoles = data.roles || [];
+            initDropdowns();
+          })
+          .catch(err => {
+            console.error('Error loading data:', err);
+            message.className = 'error';
+            message.textContent = 'Failed to load users, groups, and roles. Please refresh the page.';
+            message.style.display = 'block';
+            initDropdowns();
+          });
+
+        function initDropdowns() {
+            // Team Name dropdown
+            const teamBtn = document.getElementById('teamBtn');
+            const teamList = document.getElementById('teamList');
+            const teamSelect = document.getElementById('teamSelect');
+            const teamFeedback = document.getElementById('teamFeedback');
+            const projectNameEl = document.getElementById('projectName');
+
+            teamBtn.addEventListener('click', () => {
+                teamList.style.display = teamList.style.display === 'block' ? 'none' : 'block';
+            });
+
+            teamList.addEventListener('click', async (e) => {
+                const item = e.target.closest('.list-item');
+                if (!item) return;
+                const team = item.dataset.value;
+                document.getElementById('teamText').textContent = team;
+                teamList.style.display = 'none';
+                teamFeedback.textContent = 'Checking team access...';
+                teamFeedback.className = 'hint info';
+                projectNameEl.disabled = true;
+
+                try {
+                    const res = await fetch(`/api/check-team-access/${team}`);
+                    const data = await res.json();
+                    if (data.authorized) {
+                        teamSelect.value = team;
+                        selectedTeam = team;
+                        const newPrefix = data.prefix;
+                        // Preserve text after old prefix when switching teams
+                        const oldValue = projectNameEl.value;
+                        const suffix = currentPrefix && oldValue.startsWith(currentPrefix)
+                            ? oldValue.slice(currentPrefix.length)
+                            : (oldValue || '');
+                        currentPrefix = newPrefix;
+                        projectNameEl.value = newPrefix + suffix;
+                        projectNameEl.placeholder = newPrefix + 'my-project';
+                        projectNameEl.disabled = false;
+                        teamFeedback.textContent = `✅ Access granted — prefix: ${newPrefix}`;
+                        teamFeedback.className = 'hint success';
+                        projectNameInput.disabled = false;
+                        projectNameInput.focus();
+                        updateSubmitButtonState();
+                    } else {
+                        teamSelect.value = '';
+                        selectedTeam = '';
+                        currentPrefix = '';
+                        projectNameEl.value = '';
+                        projectNameEl.placeholder = 'Select a team first...';
+                        projectNameEl.disabled = true;
+                        teamFeedback.textContent = `❌ Access denied — you are not a member of ${data.group}`;
+                        teamFeedback.className = 'hint error';
+                        projectNameInput.disabled = true;
+                        updateSubmitButtonState();
+                    }
+                } catch (err) {
+                    teamFeedback.textContent = '⚠ Could not verify team access';
+                    teamFeedback.className = 'hint error';
+                    projectNameInput.disabled = true;
+                    updateSubmitButtonState();
+                }
+            });
+
+            // Assignment Type dropdown
+            const assignmentTypeBtn = document.getElementById('assignmentTypeBtn');
+            const assignmentTypeList = document.getElementById('assignmentTypeList');
+
+            assignmentTypeBtn.addEventListener('click', () => {
+                assignmentTypeList.style.display = assignmentTypeList.style.display === 'block' ? 'none' : 'block';
+            });
+
+            assignmentTypeList.addEventListener('click', (e) => {
+                const item = e.target.closest('.list-item');
+                if (item) {
+                    assignmentType.value = item.dataset.value;
+                    document.getElementById('assignmentTypeText').textContent = item.textContent;
+                    assignmentTypeList.style.display = 'none';
+                    // Trigger change event
+                    assignmentType.dispatchEvent(new Event('change'));
+                }
+            });
+
+            // Role dropdown
+            const roleBtn = document.getElementById('roleBtn');
+            const roleList = document.getElementById('roleList');
+
+            roleBtn.addEventListener('click', () => {
+                roleList.style.display = roleList.style.display === 'block' ? 'none' : 'block';
+            });
+
+            roleList.addEventListener('click', (e) => {
+                const item = e.target.closest('.list-item');
+                if (item) {
+                    roleSelect.value = item.dataset.value;
+                    document.getElementById('roleText').textContent = item.textContent;
+                    roleList.style.display = 'none';
+                    updateSubmitButtonState();
+                }
+            });
+
+            // User dropdown
+            const userBtn = document.getElementById('userDropdownBtn');
+            const userList = document.getElementById('userDropdownList');
+            const userSearch = document.getElementById('userSearch');
+
+            userBtn.addEventListener('click', () => {
+                userList.style.display = userList.style.display === 'block' ? 'none' : 'block';
+            });
+
+            userSearch.addEventListener('input', (e) => {
+                renderUserList(e.target.value);
+            });
+
+            userList.addEventListener('click', (e) => {
+                const item = e.target.closest('.list-item');
+                if (item) {
+                    const user = item.dataset.value;
+                    if (selectedUsers.has(user)) {
+                        selectedUsers.delete(user);
+                        item.classList.remove('selected');
+                    } else {
+                        selectedUsers.add(user);
+                        item.classList.add('selected');
+                    }
+                    updateUserDropdownText();
+                    updateSubmitButtonState();
+                }
+            });
+
+            // Group dropdown
+            const groupBtn = document.getElementById('groupDropdownBtn');
+            const groupList = document.getElementById('groupDropdownList');
+            const groupSearch = document.getElementById('groupSearch');
+
+            groupBtn.addEventListener('click', () => {
+                groupList.style.display = groupList.style.display === 'block' ? 'none' : 'block';
+            });
+
+            groupSearch.addEventListener('input', (e) => {
+                renderGroupList(e.target.value);
+            });
+
+            groupList.addEventListener('click', (e) => {
+                const item = e.target.closest('.list-item');
+                if (item) {
+                    selectedGroup = item.dataset.value;
+                    renderGroupList('');
+                    groupSearch.value = '';
+                    document.getElementById('groupDropdownText').textContent = selectedGroup;
+                    groupList.style.display = 'none';
+                    updateSubmitButtonState();
+                }
+            });
+
+            // Close dropdowns when clicking outside
+            document.addEventListener('click', (e) => {
+                if (!document.getElementById('teamDropdown').contains(e.target)) {
+                    teamList.style.display = 'none';
+                }
+                if (!document.getElementById('assignmentTypeDropdown').contains(e.target)) {
+                    assignmentTypeList.style.display = 'none';
+                }
+                if (!document.getElementById('roleDropdown').contains(e.target)) {
+                    roleList.style.display = 'none';
+                }
+                if (!document.getElementById('userDropdownContainer').contains(e.target)) {
+                    userList.style.display = 'none';
+                }
+                if (!document.getElementById('groupDropdownContainer').contains(e.target)) {
+                    groupList.style.display = 'none';
+                }
+            });
+
+            // Load roles from API
+            const roleListEl = document.getElementById('roleList');
+            roleListEl.innerHTML = '';
+            allRoles.forEach(role => {
+                const div = document.createElement('div');
+                div.className = 'list-item';
+                div.dataset.value = role;
+                div.textContent = role;
+                roleListEl.appendChild(div);
+            });
+
+            renderUserList();
+            renderGroupList();
+        }
+
+        function renderUserList(filter = '') {
+            const container = document.getElementById('userListContainer');
+            container.innerHTML = '';
+            const filtered = allUsers.filter(u => u.toLowerCase().includes(filter.toLowerCase()));
+            filtered.forEach(user => {
+                const div = document.createElement('div');
+                div.className = `list-item ${selectedUsers.has(user) ? 'selected' : ''}`;
+                div.dataset.value = user;
+                div.innerHTML = `<span>${user}</span><span class="check-icon">✓</span>`;
+                container.appendChild(div);
+            });
+        }
+
+        function renderGroupList(filter = '') {
+            const container = document.getElementById('groupListContainer');
+            container.innerHTML = '';
+            const filtered = allGroups.filter(g => g.toLowerCase().includes(filter.toLowerCase()));
+            filtered.forEach(group => {
+                const div = document.createElement('div');
+                div.className = `list-item ${selectedGroup === group ? 'selected' : ''}`;
+                div.dataset.value = group;
+                div.innerHTML = `<span>${group}</span><span class="check-icon">✓</span>`;
+                container.appendChild(div);
+            });
+        }
+
+        function updateUserDropdownText() {
+            const text = document.getElementById('userDropdownText');
+            text.textContent = selectedUsers.size > 0 ? Array.from(selectedUsers).join(', ') : 'Select users...';
+        }
+
+        assignmentType.addEventListener('change', function() {
+            const userDropdown = document.getElementById('userDropdown');
+            const groupDropdown = document.getElementById('groupDropdown');
+
+            if (this.value === 'user') {
+                userDropdown.style.display = 'block';
+                groupDropdown.style.display = 'none';
+                selectedGroup = '';
+                selectedUsers = new Set();
+                updateUserDropdownText();
+                renderUserList();
+            } else if (this.value === 'group') {
+                userDropdown.style.display = 'none';
+                groupDropdown.style.display = 'block';
+                selectedUsers = new Set();
+                document.getElementById('userDropdownText').textContent = 'Select users...';
+                renderGroupList();
+            } else {
+                userDropdown.style.display = 'none';
+                groupDropdown.style.display = 'none';
+            }
+            updateSubmitButtonState();
+        });
+
+        function getFormData() {
+            const selectedOptions = assignmentType.value === 'user'
+                ? Array.from(selectedUsers)
+                : [selectedGroup];
+
+            return {
+                projectName: document.getElementById('projectName').value,
+                teamName: selectedTeam,
+                assignmentType: assignmentType.value,
+                userOrGroupName: selectedOptions.join(', '),
+                userOrGroupNames: selectedOptions,
+                role: roleSelect.value,
+                quota: {
+                    cpuRequest: document.getElementById('cpuRequest').value || '1',
+                    memoryRequest: document.getElementById('memoryRequest').value || '4Gi',
+                    storageRequest: document.getElementById('storageRequest').value || '10Gi'
+                }
+            };
+        }
+
+        function showApprovalModal(data) {
+            const typeLabel = data.assignmentType === 'user' ? 'User(s)' : 'Group';
+            projectSummary.innerHTML = `
+                <dt>Team:</dt><dd>${data.teamName}</dd>
+                <dt>Project Name:</dt><dd>${data.projectName}</dd>
+                <dt>Assignment Type:</dt><dd>${data.assignmentType}</dd>
+                <dt>${typeLabel}:</dt><dd>${data.userOrGroupName}</dd>
+                <dt>Role:</dt><dd>${data.role}</dd>
+                <dt>Quota:</dt><dd>CPU: ${data.quota.cpuRequest}, Memory: ${data.quota.memoryRequest}, Storage: ${data.quota.storageRequest}</dd>
+            `;
+            modal.style.display = 'flex';
+        }
+
+        function hideModal() { modal.style.display = 'none'; }
+
+        async function createProject(data) {
+            console.log(`[ProjectApp] Creating project '${data.projectName}' via /api/create-project`);
+            console.log(`[ProjectApp] Request payload:`, JSON.stringify(data, null, 2));
+
+            const progressDuration = 600;
+            submitBtn.className = 'processing';
+            submitBtn.style.setProperty('--progress-duration', progressDuration + 's');
+            submitBtn.innerHTML = '<div class="btn-progress"></div><div class="btn-content"><span class="spinner"></span><span class="btn-text">Creating project...</span></div>';
+            submitBtn.disabled = true;
+
+            message.className = 'info';
+            message.textContent = '';
+            message.style.display = 'none';
+
+            try {
+                const res = await fetch('/api/create-project', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                const result = await res.json();
+                console.log(`[ProjectApp] Create project response:`, result);
+
+                if (result.success) {
+                    console.log(`[ProjectApp] PipelineRun triggered: ${result.pipelineRun}`);
+                    pollPipelineRunStatus(result.pipelineRun, data);
+                } else {
+                    console.error(`[ProjectApp] Create project FAILED:`, result.message);
+                    submitBtn.className = '';
+                    submitBtn.innerHTML = 'Create Project';
+                    message.className = 'error';
+                    let errorMsg = `Error: ${result.message || 'Failed to trigger PipelineRun'}\n\n`;
+                    if (result.consoleUrl) {
+                        errorMsg += `View details: <a href="${result.consoleUrl}" target="_blank" style="color:var(--ink);">${result.consoleUrl}</a>`;
+                    }
+                    message.innerHTML = errorMsg;
+                    message.style.display = 'block';
+                    submitBtn.disabled = false;
+                }
+            } catch (err) {
+                console.error(`[ProjectApp] Create project request FAILED:`, err.message);
+                submitBtn.className = '';
+                submitBtn.innerHTML = 'Create Project';
+                message.className = 'error';
+                message.textContent = 'Failed to create project';
+                message.style.display = 'block';
+                submitBtn.disabled = false;
+            }
+        }
+
+        async function pollPipelineRunStatus(pipelineRunName, formData) {
+            let retryCount = 0;
+            const maxRetries = 120;
+
+            const updateButtonText = (text) => {
+                const btnText = submitBtn.querySelector('.btn-text');
+                if (btnText) btnText.textContent = text;
+            };
+
+            const progressSteps = ['Creating project...', 'Creating quota...', 'Setting up network...', 'Assigning role...', 'Finalizing...'];
+            let stepIndex = 0;
+            const stepInterval = Math.floor(maxRetries / progressSteps.length);
+
+            const checkStatus = async () => {
+                retryCount++;
+                console.log(`[ProjectApp] Polling PipelineRun '${pipelineRunName}' status... (${retryCount}/${maxRetries})`);
+                if (retryCount > maxRetries) {
+                    submitBtn.className = '';
+                    submitBtn.innerHTML = 'Create Project';
+                    message.className = 'error';
+                    message.textContent = 'Timeout: Pipeline did not complete within 10 minutes';
+                    message.style.display = 'block';
+                    submitBtn.disabled = false;
+                    return;
+                }
+
+                if (stepIndex < progressSteps.length && retryCount % stepInterval === 0) {
+                    updateButtonText(progressSteps[stepIndex]);
+                    stepIndex++;
+                }
+
+                try {
+                    const res = await fetch(`/api/pipelinerun-status/${pipelineRunName}`);
+                    const data = await res.json();
+                    if (data.isComplete) {
+                        console.log(`[ProjectApp] PipelineRun '${pipelineRunName}' completed — status: ${data.status}`);
+                        submitBtn.className = '';
+                        submitBtn.innerHTML = 'Create Project';
+
+                        if (data.status === 'Succeeded') {
+                            message.className = 'success';
+                            message.innerHTML = `✅ Project created successfully!\n\n` +
+                                `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+                                `Project Name: ${formData.projectName}\n` +
+                                `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+                                `Role Assignment:\n` +
+                                `  Type: ${formData.assignmentType}\n` +
+                                `  ${formData.assignmentType === 'user' ? 'User(s)' : 'Group'}: ${formData.userOrGroupName}\n` +
+                                `  Role: ${formData.role}\n\n` +
+                                `Quotas:\n` +
+                                `  CPU: ${formData.quota.cpuRequest}\n` +
+                                `  Memory: ${formData.quota.memoryRequest}\n` +
+                                `  Storage: ${formData.quota.storageRequest}`;
+                            message.style.display = 'block';
+                            resetForm();
+                        } else {
+                            message.className = 'error';
+                            let errorMsg = `❌ Pipeline failed!\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+                            if (data.reason) errorMsg += `Error: ${data.reason}\n\n`;
+                            errorMsg += `Click the link below to view PipelineRun details:\n`;
+                            if (data.consoleUrl) {
+                                errorMsg += `<a href="${data.consoleUrl}" target="_blank" style="color:var(--ink);">${data.consoleUrl}</a>`;
+                            } else {
+                                errorMsg += `PipelineRun: ${pipelineRunName}`;
+                            }
+                            message.innerHTML = errorMsg;
+                            message.style.display = 'block';
+                            submitBtn.disabled = false;
+                        }
+                        return;
+                    }
+                    const progressPercent = Math.round((retryCount / maxRetries) * 100);
+                    message.className = 'info';
+                    message.textContent = `⏳ Waiting for pipeline to complete... (${progressPercent}%)`;
+                    message.style.display = 'block';
+                    setTimeout(checkStatus, 5000);
+                } catch (err) {
+                    message.textContent += '\nError checking status';
+                    submitBtn.disabled = false;
+                }
+            };
+            checkStatus();
+        }
+
+        function resetForm() {
+            selectedTeam = '';
+            selectedUsers = new Set();
+            selectedGroup = '';
+            currentPrefix = '';
+            projectNameValid = false;
+            assignmentType.value = '';
+            roleSelect.value = '';
+
+            document.getElementById('teamText').textContent = 'Select team...';
+            document.getElementById('teamSelect').value = '';
+            document.getElementById('teamFeedback').textContent = '';
+            document.getElementById('teamFeedback').className = 'hint';
+
+            projectNameInput.value = '';
+            projectNameInput.disabled = true;
+            projectNameInput.placeholder = 'Select a team first...';
+            projectNameInput.className = '';
+            document.getElementById('projectNameIcon').className = 'input-status-icon';
+            document.getElementById('projectNameIcon').textContent = '';
+            document.getElementById('projectNameFeedback').textContent = '';
+
+            document.getElementById('assignmentTypeText').textContent = 'Select type...';
+            document.getElementById('userDropdown').style.display = 'none';
+            document.getElementById('groupDropdown').style.display = 'none';
+            document.getElementById('userDropdownText').textContent = 'Select users...';
+            document.getElementById('groupDropdownText').textContent = 'Select group...';
+            renderUserList();
+            renderGroupList();
+
+            document.getElementById('roleText').textContent = 'Select role...';
+
+            document.getElementById('cpuRequest').value = '2';
+            document.getElementById('memoryRequest').value = '4Gi';
+            document.getElementById('storageRequest').value = '10Gi';
+
+            submitBtn.disabled = true;
+            updateSubmitButtonState();
+        }
+
+        document.getElementById('projectForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            message.style.display = 'none';
+
+            if (!selectedTeam) {
+                message.className = 'error';
+                message.textContent = 'Please select a team first';
+                message.style.display = 'block';
+                return;
+            } else if (!assignmentType.value) {
+                message.className = 'error';
+                message.textContent = 'Please select an assignment type (User or Group)';
+                message.style.display = 'block';
+                return;
+            } else if (assignmentType.value === 'user' && selectedUsers.size === 0) {
+                message.className = 'error';
+                message.textContent = 'Please select at least one user';
+                message.style.display = 'block';
+                return;
+            } else if (assignmentType.value === 'group' && !selectedGroup) {
+                message.className = 'error';
+                message.textContent = 'Please select a group';
+                message.style.display = 'block';
+                return;
+            } else if (!roleSelect.value) {
+                message.className = 'error';
+                message.textContent = 'Please select a role';
+                message.style.display = 'block';
+                return;
+            }
+
+            pendingData = getFormData();
+            showApprovalModal(pendingData);
+        });
+
+        document.getElementById('btnConfirm').addEventListener('click', async function() {
+            hideModal();
+            if (pendingData) {
+                submitBtn.disabled = true;
+                await createProject(pendingData);
+                pendingData = null;
+            }
+        });
+
+        document.getElementById('btnCancel').addEventListener('click', function() {
+            hideModal();
+            pendingData = null;
+        });
+
+        modal.addEventListener('click', function(e) {
+            if (e.target === modal) { hideModal(); pendingData = null; }
+        });
+
+        const projectNameInput = document.getElementById('projectName');
+        const projectNameFeedback = document.getElementById('projectNameFeedback');
+
+
+        // Debounce function (to avoid checking on every keystroke)
+        function debounce(func, delay) {
+            let timeout;
+            return function(...args) {
+                const context = this;
+                clearTimeout(timeout);
+                timeout = setTimeout(() => func.apply(context, args), delay);
+            };
+        }
+
+        const projectNameIcon = document.getElementById('projectNameIcon');
+        const nameStatusModal = document.getElementById('nameStatusModal');
+        const nameModalIcon = document.getElementById('nameModalIcon');
+        const nameModalMessage = document.getElementById('nameModalMessage');
+        const nameModalHeaderIcon = document.getElementById('nameModalHeaderIcon');
+        const nameModalOkBtn = document.getElementById('nameModalOkBtn');
+
+        async function checkProjectNameAvailability(name) {
+            const apiUrl = `/api/check-project-name/${encodeURIComponent(name)}`;
+            console.log(`[ProjectApp] Project name '${name}' is being checked via ${apiUrl}`);
+            projectNameFeedback.textContent = 'Checking availability...';
+            projectNameFeedback.className = 'hint info';
+            projectNameIcon.className = 'input-status-icon';
+            projectNameIcon.textContent = '';
+            submitBtn.disabled = true;
+            try {
+                const res = await fetch(apiUrl);
+                const data = await res.json();
+                console.log(`[ProjectApp] Project name '${name}' availability result:`, data.available ? 'AVAILABLE' : 'TAKEN');
+                return data.available;
+            } catch (err) {
+                console.error(`[ProjectApp] Project name '${name}' check FAILED — API unreachable:`, err.message);
+                return null; // API unreachable
+            }
+        }
+
+        function validateProjectName(name) {
+            console.log(`[ProjectApp] Validating project name format: '${name}'`);
+            const errors = [];
+
+            // 1. Max 63 characters
+            if (name.length > 63) {
+                errors.push(`Project name must be 63 characters or fewer (got ${name.length})`);
+            }
+
+            // 2. RFC 1123 DNS label: start with lowercase letter, contain only [a-z0-9-], end with letter or digit
+            if (!/^[a-z][a-z0-9-]*[a-z0-9]$/.test(name)) {
+                errors.push(`Project name '${name}' does not match RFC 1123: must start with lowercase letter, contain only [a-z0-9-], end with letter or digit`);
+            }
+
+            // 3. Must start with selected team prefix
+            if (currentPrefix && !name.startsWith(currentPrefix)) {
+                errors.push(`Project name must start with '${currentPrefix}' prefix. Got: '${name}'`);
+            }
+
+            // 4. Minimum length: prefix + at least 3 characters
+            if (currentPrefix && name.startsWith(currentPrefix) && name.length < currentPrefix.length + 3) {
+                errors.push(`Project name must have at least 3 characters after '${currentPrefix}' prefix (got ${name.length - currentPrefix.length})`);
+            }
+
+            if (errors.length > 0) {
+                console.warn(`[ProjectApp] Validation FAILED for '${name}':`, errors);
+            } else {
+                console.log(`[ProjectApp] Validation PASSED for '${name}'`);
+            }
+            return errors;
+        }
+
+        function showNameStatusModal(isAvailable, name, errors) {
+            if (errors && errors.length > 0) {
+                nameModalHeaderIcon.textContent = '❌';
+                nameModalIcon.textContent = '⚠️';
+                nameModalMessage.innerHTML = errors.map(e => `• ${e}`).join('<br>');
+            } else if (isAvailable) {
+                nameModalHeaderIcon.textContent = '✅';
+                nameModalIcon.textContent = '✅';
+                nameModalMessage.textContent = `"${name}" project name is available!`;
+            } else {
+                nameModalHeaderIcon.textContent = '❌';
+                nameModalIcon.textContent = '❌';
+                nameModalMessage.textContent = `"${name}" project name already exists. Please choose another.`;
+            }
+            nameStatusModal.style.display = 'flex';
+        }
+
+        function hideNameStatusModal() {
+            nameStatusModal.style.display = 'none';
+        }
+
+        nameModalOkBtn.addEventListener('click', hideNameStatusModal);
+        nameStatusModal.addEventListener('click', function(e) {
+            if (e.target === nameStatusModal) hideNameStatusModal();
+        });
+
+        projectNameInput.addEventListener('input', debounce(async () => {
+            const name = projectNameInput.value.trim();
+            if (name.length > 0) {
+                // First: validate format rules
+                const errors = validateProjectName(name);
+                if (errors.length > 0) {
+                    projectNameFeedback.textContent = errors[0];
+                    projectNameFeedback.className = 'hint error';
+                    projectNameIcon.textContent = '✖';
+                    projectNameIcon.style.color = '#d63443';
+                    projectNameIcon.className = 'input-status-icon show';
+                    projectNameValid = false;
+                    updateSubmitButtonState();
+                    showNameStatusModal(false, name, errors);
+                    return;
+                }
+
+                // Second: check availability (only if format is valid)
+                const isAvailable = await checkProjectNameAvailability(name);
+                if (isAvailable === null) {
+                    // API unreachable
+                    projectNameFeedback.textContent = 'Could not verify — server unreachable.';
+                    projectNameFeedback.className = 'hint error';
+                    projectNameIcon.textContent = '⚠';
+                    projectNameIcon.style.color = '#e6a817';
+                    projectNameIcon.className = 'input-status-icon show';
+                    submitBtn.disabled = true;
+                    showNameStatusModal(false, name, ['Could not connect to server to verify project name. Make sure the application server is running.']);
+                } else if (isAvailable) {
+                    projectNameFeedback.textContent = 'Project name available!';
+                    projectNameFeedback.className = 'hint success';
+                    projectNameIcon.textContent = '✔';
+                    projectNameIcon.style.color = '#2e9e5e';
+                    projectNameIcon.className = 'input-status-icon show';
+                    projectNameValid = true;
+                    updateSubmitButtonState();
+                    showNameStatusModal(isAvailable, name);
+                } else {
+                    projectNameFeedback.textContent = 'Project name already exists.';
+                    projectNameFeedback.className = 'hint error';
+                    projectNameIcon.textContent = '✖';
+                    projectNameIcon.style.color = '#d63443';
+                    projectNameIcon.className = 'input-status-icon show';
+                    projectNameValid = false;
+                    updateSubmitButtonState();
+                    showNameStatusModal(isAvailable, name);
+                }
+            } else {
+                projectNameFeedback.textContent = '';
+                projectNameIcon.className = 'input-status-icon';
+                projectNameIcon.textContent = '';
+                projectNameValid = false;
+                updateSubmitButtonState();
+            }
+        }, 500));
+
+        // Handle API unreachable case
+        projectNameInput.addEventListener('input', () => {
+            if (projectNameInput.value.trim().length === 0) {
+                projectNameValid = false;
+                updateSubmitButtonState();
+            }
+        });
+
+        // Initially disable submit button
+        submitBtn.disabled = true;
+    </script>
+</body>
+</html>

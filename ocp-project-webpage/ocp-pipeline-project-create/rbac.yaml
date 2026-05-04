@@ -1,0 +1,63 @@
+# =============================================================================
+# RBAC for Tekton Pipeline ServiceAccount
+# Grants the pipeline-sa the minimum permissions needed for project provisioning.
+# =============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pipeline-sa
+  namespace: openshift-project-app
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: project-provisioning-role
+  labels:
+    app.kubernetes.io/part-of: project-provisioning
+rules:
+  # Namespace management (create, get, list, delete for rollback)
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["create", "get", "list", "patch", "delete"]
+  # OpenShift project requests
+  - apiGroups: ["project.openshift.io"]
+    resources: ["projectrequests"]
+    verbs: ["create"]
+  - apiGroups: ["project.openshift.io"]
+    resources: ["projects"]
+    verbs: ["get", "list", "delete"]
+  # ResourceQuota management
+  - apiGroups: [""]
+    resources: ["resourcequotas"]
+    verbs: ["create", "get", "list", "update", "delete"]
+  # LimitRange management
+  - apiGroups: [""]
+    resources: ["limitranges"]
+    verbs: ["create", "get", "list", "update", "delete"]
+  # NetworkPolicy management
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["create", "get", "list", "update", "delete"]
+  # RoleBinding management (for RBAC assignment)
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["create", "get", "list", "update", "delete"]
+  # Roles (read-only, for validation)
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "clusterroles"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: pipeline-sa-provisioning-binding
+  labels:
+    app.kubernetes.io/part-of: project-provisioning
+subjects:
+  - kind: ServiceAccount
+    name: pipeline-sa
+    namespace: openshift-project-app
+roleRef:
+  kind: ClusterRole
+  name: project-provisioning-role
+  apiGroup: rbac.authorization.k8s.io
