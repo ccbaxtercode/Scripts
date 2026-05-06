@@ -1,0 +1,215 @@
+# =============================================================================
+# Tekton Pipeline: OpenShift Project Provisioning
+# Target: OpenShift 4.x with Tekton Pipelines Operator
+# API: tekton.dev/v1
+#
+# Flow:
+#   validate-inputs
+#     └── check-namespace
+#           └── create-namespace
+#                 ├── assign-roles ──────────┐
+#                 ├── create-quota ──────────┤
+#                 ├── create-network-policies ┤ (parallel)
+#                 └── set-requester ─────────┘
+#                           └── verify-resources
+#
+# Finally (on failure): rollback-project
+# =============================================================================
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: create-project-and-assign-role
+  labels:
+    app.kubernetes.io/part-of: project-provisioning
+  annotations:
+    tekton.dev/displayName: "OpenShift Project Creator"
+    tekton.dev/pipelines.minVersion: "0.50.0"
+spec:
+  description: >
+    Creates an OpenShift project with role assignments, resource quotas,
+    network policies and project labels.
+
+  params:
+    - name: project-name
+      type: string
+      description: "Name of the project/namespace. Must conform to RFC 1123 with valid prefix."
+    - name: assignment-type
+      type: string
+      description: "Type of role assignment: user or group"
+    - name: user-or-group-name
+      type: string
+      description: "Comma-separated user/group names for role assignment"
+    - name: user-or-group-names-json
+      type: string
+      description: "JSON array of user/group names. Example: [\"ali\",\"veli\"]"
+    - name: cpu-request
+      type: string
+      description: "CPU quota request value"
+    - name: memory-request
+      type: string
+      description: "Memory quota request value"
+    - name: storage-request
+      type: string
+      description: "Storage quota request value"
+    - name: role-name
+      type: string
+      description: "ClusterRole name to assign"
+    - name: project-label
+      type: string
+      description: "Label to apply to the namespace. Format: key=value"
+
+  tasks:
+    # Step 1: Validate inputs
+    - name: validate-inputs
+      timeout: "2m"
+      taskRef:
+        name: validate-project-inputs
+      params:
+        - name: project-name
+          value: $(params.project-name)
+        - name: project-label
+          value: $(params.project-label)
+        - name: assignment-type
+          value: $(params.assignment-type)
+        - name: user-or-group-name
+          value: $(params.user-or-group-name)
+        - name: user-or-group-names-json
+          value: $(params.user-or-group-names-json)
+        - name: role-name
+          value: $(params.role-name)
+        - name: cpu-request
+          value: $(params.cpu-request)
+        - name: memory-request
+          value: $(params.memory-request)
+        - name: storage-request
+          value: $(params.storage-request)
+
+    # Step 2: Check namespace does not already exist
+    - name: check-namespace
+      timeout: "2m"
+      retries: 1
+      runAfter:
+        - validate-inputs
+      taskRef:
+        name: check-namespace-existence
+      params:
+        - name: project-name
+          value: $(params.project-name)
+
+    # Step 3: Create namespace
+    - name: create-namespace
+      timeout: "3m"
+      retries: 2
+      runAfter:
+        - check-namespace
+      taskRef:
+        name: create-project-namespace
+      params:
+        - name: project-name
+          value: $(params.project-name)
+        - name: project-label
+          value: $(params.project-label)
+
+    # Step 4a: Assign roles (parallel)
+    - name: assign-roles
+      timeout: "3m"
+      retries: 2
+      runAfter:
+        - create-namespace
+      taskRef:
+        name: assign-roles-to-users
+      params:
+        - name: project-name
+          value: $(params.project-name)
+        - name: assignment-type
+          value: $(params.assignment-type)
+        - name: user-or-group-names-json
+          value: $(params.user-or-group-names-json)
+        - name: role-name
+          value: $(params.role-name)
+
+    # Step 4b: Create ResourceQuota (parallel)
+    - name: create-quota
+      timeout: "3m"
+      retries: 2
+      runAfter:
+        - create-namespace
+      taskRef:
+        name: create-project-quota
+      params:
+        - name: project-name
+          value: $(params.project-name)
+        - name: cpu-request
+          value: $(params.cpu-request)
+        - name: memory-request
+          value: $(params.memory-request)
+        - name: storage-request
+          value: $(params.storage-request)
+        - name: project-label
+          value: $(params.project-label)
+
+    # Step 4c: Create NetworkPolicies (parallel)
+    - name: create-network-policies
+      timeout: "3m"
+      retries: 2
+      runAfter:
+        - create-namespace
+      taskRef:
+        name: create-network-policies
+      params:
+        - name: project-name
+          value: $(params.project-name)
+
+    # Step 4d: Set requester annotation (parallel)
+    - name: set-requester
+      timeout: "2m"
+      retries: 1
+      runAfter:
+        - create-namespace
+      taskRef:
+        name: set-requester-annotation
+      params:
+        - name: project-name
+          value: $(params.project-name)
+
+    # Step 5: Final verification
+    - name: verify-resources
+      timeout: "3m"
+      retries: 1
+      runAfter:
+        - assign-roles
+        - create-quota
+        - create-network-policies
+        - set-requester
+      taskRef:
+        name: verify-project-resources
+      params:
+        - name: project-name
+          value: $(params.project-name)
+        - name: project-label
+          value: $(params.project-label)
+        - name: role-name
+          value: $(params.role-name)
+        - name: cpu-request
+          value: $(params.cpu-request)
+        - name: memory-request
+          value: $(params.memory-request)
+        - name: storage-request
+          value: $(params.storage-request)
+        - name: assignment-type
+          value: $(params.assignment-type)
+        - name: user-or-group-name
+          value: $(params.user-or-group-name)
+
+  finally:
+    - name: rollback-on-failure
+      timeout: "5m"
+      when:
+        - input: $(tasks.status)
+          operator: in
+          values: ["Failed"]
+      taskRef:
+        name: rollback-project
+      params:
+        - name: project-name
+          value: $(params.project-name)
