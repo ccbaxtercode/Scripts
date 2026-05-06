@@ -1,0 +1,276 @@
+# =============================================================================
+# Tekton Pipeline: OpenShift Project Provisioning
+# Target: OpenShift 4.19.21 with Tekton Pipelines Operator
+# API: tekton.dev/v1
+#
+# Flow:
+#   validate-inputs
+#     └── check-namespace
+#           └── create-namespace
+#                 ├── create-role-bindings ──┐
+#                 ├── create-resource-quota ─┤
+#                 ├── create-limit-range ────┤
+#                 └── create-network-policies┘
+#                           └── verify-resources
+#
+# Finally (on failure): rollback-project
+# Finally (always):     generate-pipeline-output
+# =============================================================================
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: provision-openshift-project
+  labels:
+    app.kubernetes.io/part-of: project-provisioning
+  annotations:
+    tekton.dev/displayName: "OpenShift Project Provisioning Pipeline"
+    tekton.dev/pipelines.minVersion: "0.50.0"
+spec:
+  description: >
+    End-to-end OpenShift project provisioning pipeline with validation,
+    RBAC, resource governance, network security, verification and rollback.
+
+  # ---------------------------------------------------------------------------
+  # Pipeline Timeouts (global safety net)
+  # ---------------------------------------------------------------------------
+  # Individual task timeouts are set per-task below. These global timeouts
+  # act as an upper bound to prevent infinite execution from retries/delays.
+  timeouts:
+    pipeline: "20m"     # Max total pipeline duration (includes retries)
+    tasks: "15m"        # Max total time for all regular tasks
+    finally: "8m"       # Max total time for finally tasks (rollback + output)
+
+
+  # ---------------------------------------------------------------------------
+  # Pipeline Parameters
+  # ---------------------------------------------------------------------------
+  params:
+    - name: project-name
+      type: string
+      description: >
+        Name of the project/namespace. Must conform to RFC 1123 and start
+        with the 'dev-' prefix.
+    - name: labels
+      type: string
+      description: >
+        JSON object of labels to apply. Example: {"env":"dev","team":"backend"}
+      default: "{}"
+    - name: requester
+      type: string
+      description: >
+        Identity of the user/system triggering the pipeline.
+    - name: role-bindings
+      type: string
+      description: >
+        JSON array of role binding definitions.
+        Example: [{"type":"user","name":"john","role":"edit"},
+                  {"type":"group","name":"developers","role":"view"}]
+    - name: resource-quota
+      type: string
+      description: >
+        JSON object of resource quota hard limits.
+        Example: {"cpu":"4","memory":"8Gi","storage":"50Gi","pods":"20"}
+    - name: annotations
+      type: string
+      description: >
+        JSON object of annotations. Example: {"owner":"team-a","cost-center":"CC-123"}
+      default: "{}"
+    # LimitRange defaults (optional overrides)
+    - name: default-cpu-limit
+      type: string
+      default: "500m"
+    - name: default-cpu-request
+      type: string
+      default: "100m"
+    - name: default-memory-limit
+      type: string
+      default: "512Mi"
+    - name: default-memory-request
+      type: string
+      default: "128Mi"
+    - name: max-cpu
+      type: string
+      default: "2"
+    - name: max-memory
+      type: string
+      default: "4Gi"
+
+  # ---------------------------------------------------------------------------
+  # Pipeline Results
+  # ---------------------------------------------------------------------------
+  results:
+    - name: pipeline-output
+      description: "JSON report of pipeline execution"
+      value: $(finally.generate-output.results.pipeline-output)
+
+  # ---------------------------------------------------------------------------
+  # Pipeline Tasks
+  # ---------------------------------------------------------------------------
+  tasks:
+    # Step 1: Validate all inputs
+    - name: validate-inputs
+      timeout: "2m"
+      taskRef:
+        name: validate-inputs
+      params:
+        - name: project-name
+          value: $(params.project-name)
+        - name: labels
+          value: $(params.labels)
+        - name: annotations
+          value: $(params.annotations)
+        - name: requester
+          value: $(params.requester)
+        - name: role-bindings
+          value: $(params.role-bindings)
+        - name: resource-quota
+          value: $(params.resource-quota)
+
+    # Step 2: Ensure namespace does not already exist
+    - name: check-namespace
+      timeout: "2m"
+      retries: 1
+      runAfter:
+        - validate-inputs
+      taskRef:
+        name: check-namespace-existence
+      params:
+        - name: project-name
+          value: $(params.project-name)
+
+    # Step 3: Create namespace with labels, annotations and requester
+    - name: create-namespace
+      timeout: "3m"
+      retries: 2
+      runAfter:
+        - check-namespace
+      taskRef:
+        name: create-project-namespace
+      params:
+        - name: project-name
+          value: $(params.project-name)
+        - name: labels
+          value: $(params.labels)
+        - name: annotations
+          value: $(params.annotations)
+        - name: requester
+          value: $(params.requester)
+
+    # Step 4a: Create RoleBindings (parallel with 4b, 4c, 4d)
+    - name: create-role-bindings
+      timeout: "3m"
+      retries: 2
+      runAfter:
+        - create-namespace
+      taskRef:
+        name: create-role-bindings
+      params:
+        - name: project-name
+          value: $(params.project-name)
+        - name: role-bindings
+          value: $(params.role-bindings)
+        - name: requester
+          value: $(params.requester)
+
+    # Step 4b: Create ResourceQuota (parallel)
+    - name: create-resource-quota
+      timeout: "3m"
+      retries: 2
+      runAfter:
+        - create-namespace
+      taskRef:
+        name: create-resource-quota
+      params:
+        - name: project-name
+          value: $(params.project-name)
+        - name: resource-quota
+          value: $(params.resource-quota)
+
+    # Step 4c: Create LimitRange (parallel)
+    - name: create-limit-range
+      timeout: "3m"
+      retries: 2
+      runAfter:
+        - create-namespace
+      taskRef:
+        name: create-limit-range
+      params:
+        - name: project-name
+          value: $(params.project-name)
+        - name: default-cpu-limit
+          value: $(params.default-cpu-limit)
+        - name: default-cpu-request
+          value: $(params.default-cpu-request)
+        - name: default-memory-limit
+          value: $(params.default-memory-limit)
+        - name: default-memory-request
+          value: $(params.default-memory-request)
+        - name: max-cpu
+          value: $(params.max-cpu)
+        - name: max-memory
+          value: $(params.max-memory)
+
+    # Step 4d: Create NetworkPolicies (parallel)
+    - name: create-network-policies
+      timeout: "3m"
+      retries: 2
+      runAfter:
+        - create-namespace
+      taskRef:
+        name: create-network-policies
+      params:
+        - name: project-name
+          value: $(params.project-name)
+
+    # Step 5: Final verification — runs after all resource creation
+    - name: verify-resources
+      timeout: "3m"
+      retries: 1
+      runAfter:
+        - create-role-bindings
+        - create-resource-quota
+        - create-limit-range
+        - create-network-policies
+      taskRef:
+        name: verify-project-resources
+      params:
+        - name: project-name
+          value: $(params.project-name)
+        - name: requester
+          value: $(params.requester)
+        - name: labels
+          value: $(params.labels)
+        - name: annotations
+          value: $(params.annotations)
+
+  # ---------------------------------------------------------------------------
+  # Finally Tasks (always execute)
+  # ---------------------------------------------------------------------------
+  finally:
+    # Rollback: only runs if ANY task failed
+    - name: rollback-on-failure
+      timeout: "5m"
+      when:
+        - input: $(tasks.status)
+          operator: in
+          values: ["Failed"]
+      taskRef:
+        name: rollback-project
+      params:
+        - name: project-name
+          value: $(params.project-name)
+        - name: requester
+          value: $(params.requester)
+
+    # Output: always runs — produces the final JSON report
+    - name: generate-output
+      timeout: "3m"
+      taskRef:
+        name: generate-pipeline-output
+      params:
+        - name: project-name
+          value: $(params.project-name)
+        - name: requester
+          value: $(params.requester)
+        - name: pipeline-status
+          value: $(tasks.status)
